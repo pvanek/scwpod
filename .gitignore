@@ -1,0 +1,31 @@
+# Build output
+/bin/
+/dist/
+/scwpod
+/scwpod.exe
+
+# Go test and coverage artifacts
+*.test
+*.out
+coverage.*
+
+# Local Go workspace
+go.work
+go.work.sum
+
+# Go module cache of the GitLab CI jobs
+/.go/
+
+# Editors and OS files
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# Never commit credentials (scwpod keeps them in ~/.config, but just in case)
+.env
+*.env
+cockpit-tokens.json
+config.yaml
