@@ -18,6 +18,7 @@ var autoIntervals = [tabCount]time.Duration{
 	tabProjects:   time.Minute,
 	tabContainers: time.Minute,
 	tabDatabases:  time.Minute,
+	tabStorage:    5 * time.Minute,
 	tabUsers:      5 * time.Minute,
 	tabBilling:    5 * time.Minute, // billing data itself updates only hourly
 }
@@ -81,6 +82,9 @@ func (m *Model) refreshTab(t tab) tea.Cmd {
 		containers()
 		databases()
 		billing()
+	case tabStorage:
+		m.storage.loading = true
+		cmds = append(cmds, fetch(m.svc.Storage), m.fetchBuckets())
 	case tabUsers:
 		m.users.loading = true
 		cmds = append(cmds, fetch(m.svc.Users))

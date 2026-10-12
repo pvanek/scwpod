@@ -34,6 +34,23 @@ func (fakeFetcher) Databases(context.Context) ([]core.Database, error) {
 	return []core.Database{{ID: "d1", Name: "pg-main", ProjectID: "p2", Engine: "PostgreSQL-16", Status: "ready"}}, nil
 }
 
+func (fakeFetcher) Storage(context.Context) ([]core.StorageItem, error) {
+	two := 2
+	return []core.StorageItem{
+		{Kind: core.StorageRegistry, ID: "r1", Name: "images", ProjectID: "p1", Location: "fr-par", Status: "ready",
+			SizeBytes: 1.5e9, Images: &two, Endpoint: "rg.fr-par.scw.cloud/images"},
+		{Kind: core.StorageBlock, ID: "v1", Name: "pgdata", ProjectID: "p2", Location: "fr-par-1", Status: "in_use",
+			SizeBytes: 50e9, Class: "sbs_5k", IOPS: 5000, AttachedTo: []string{"db-vm"}},
+		{Kind: core.StorageLocal, ID: "v2", Name: "root", ProjectID: "p2", Location: "fr-par-1", Status: "available",
+			SizeBytes: 20e9, Class: "l_ssd"},
+	}, errors.New("listing file systems in fr-par: permission denied")
+}
+
+func (fakeFetcher) Buckets(context.Context, []string) ([]core.StorageItem, error) {
+	return []core.StorageItem{{Kind: core.StorageObject, ID: "assets", Name: "assets", ProjectID: "p1",
+		Location: "nl-ams", Endpoint: "https://assets.s3.nl-ams.scw.cloud"}}, nil
+}
+
 func (fakeFetcher) Users(context.Context) ([]core.User, error) {
 	return nil, errors.New("permission denied")
 }
@@ -114,6 +131,10 @@ func loaded(t *testing.T) Model {
 	tm, _ = tm.Update(fetched[[]core.Container]{data: c, err: err})
 	d, err := f.Databases(ctx)
 	tm, _ = tm.Update(fetched[[]core.Database]{data: d, err: err})
+	st, err := f.Storage(ctx)
+	tm, _ = tm.Update(fetched[[]core.StorageItem]{data: st, err: err})
+	bk, err := f.Buckets(ctx, nil)
+	tm, _ = tm.Update(fetched[bucketList]{data: bk, err: err})
 	u, err := f.Users(ctx)
 	tm, _ = tm.Update(fetched[[]core.User]{data: u, err: err})
 	b, err := f.Billing(ctx, "2026-10", m.now())
@@ -158,7 +179,7 @@ func TestProjectScopeFilters(t *testing.T) {
 }
 
 func TestTabErrorIsShown(t *testing.T) {
-	m := press(loaded(t), "4") // users
+	m := press(loaded(t), "5") // users
 	if out := m.render(); !strings.Contains(out, "permission denied") {
 		t.Errorf("users error not shown:\n%s", out)
 	}
@@ -175,7 +196,7 @@ func resize(m Model, w, h int) Model {
 }
 
 func TestBillingPanel(t *testing.T) {
-	m := resize(press(loaded(t), "5"), 170, 40)
+	m := resize(press(loaded(t), "6"), 170, 40)
 	out := m.render()
 	for _, want := range []string{
 		"This month 2026-10", "Consumption", "10.50 EUR", "-0.50 EUR", "Total", "12.00 EUR",
@@ -194,7 +215,7 @@ func TestBillingPanel(t *testing.T) {
 }
 
 func TestBillingPanelNarrowStacks(t *testing.T) {
-	m := resize(press(loaded(t), "5"), 60, 50)
+	m := resize(press(loaded(t), "6"), 60, 50)
 	out := m.render()
 	for i, line := range strings.Split(out, "\n") {
 		if w := lipgloss.Width(line); w > 60 {
@@ -212,7 +233,7 @@ func sendKey(m Model, code rune) Model {
 }
 
 func TestArrowKeysMoveTableCursor(t *testing.T) {
-	m := press(loaded(t), "5") // billing: 2 rows
+	m := press(loaded(t), "6") // billing: 2 rows
 	m = sendKey(m, tea.KeyDown)
 	if got := m.cur().table.Cursor(); got != 1 {
 		t.Fatalf("after down: cursor = %d, want 1", got)
@@ -286,7 +307,7 @@ func TestProjectsEnterShowsProject(t *testing.T) {
 }
 
 func TestEnterOnEmptyTableIsNoop(t *testing.T) {
-	m := press(loaded(t), "4") // users failed to load: no rows
+	m := press(loaded(t), "5") // users failed to load: no rows
 	m = sendKey(m, tea.KeyEnter)
 	if m.detail != nil {
 		t.Error("detail opened on empty table")
@@ -517,7 +538,7 @@ func TestAutoRefreshPerTab(t *testing.T) {
 	if !m.auto[tabOverview] {
 		t.Fatal("Overview auto-refresh should start on")
 	}
-	for _, tb := range []tab{tabProjects, tabContainers, tabDatabases, tabUsers, tabBilling} {
+	for _, tb := range []tab{tabProjects, tabContainers, tabDatabases, tabStorage, tabUsers, tabBilling} {
 		if m.auto[tb] {
 			t.Errorf("tab %d auto-refresh on by default", tb)
 		}
@@ -527,7 +548,7 @@ func TestAutoRefreshPerTab(t *testing.T) {
 	}
 
 	// Users: off, so a due tick does nothing.
-	m = press(m, "4")
+	m = press(m, "5")
 	m.lastRefresh[tabUsers] = m.now().Add(-time.Hour)
 	m.onAutoTick()
 	if m.users.loading {
@@ -568,7 +589,7 @@ func TestAutoRefreshPerTab(t *testing.T) {
 }
 
 func TestAutoRefreshOnlyVisibleTab(t *testing.T) {
-	m := press(loaded(t), "5") // billing, auto off; overview still on
+	m := press(loaded(t), "6") // billing, auto off; overview still on
 	m.lastRefresh[tabOverview] = m.now().Add(-time.Hour)
 	m.onAutoTick()
 	if m.containers.loading || m.databases.loading {
@@ -720,5 +741,53 @@ func TestLinkCellKeepsHighlight(t *testing.T) {
 	row := tableStyles(true).Selected.Render("a " + linkCell("name", "https://example.com") + " b")
 	if strings.Count(row, "\x1b[m") != 1 || !strings.HasSuffix(row, "\x1b[m") {
 		t.Errorf("highlight reset inside the row: %q", row)
+	}
+}
+
+func TestStorageTab(t *testing.T) {
+	m := resize(press(loaded(t), "4"), 120, 40)
+	out := ansi.Strip(m.render())
+	for _, want := range []string{
+		"4 Storage", "Object 1 · Registry 1 (1.5G) · Block 1 (50.0G) · Local 1 (20.0G) · File 0",
+		"Object Storage buckets (1)", "assets", "https://assets.s3.nl-ams",
+		"Container Registry namespaces (1)", "images", "private",
+		"Block Storage volumes (1)", "pgdata", "sbs_5k", "db-vm",
+		"Local volumes (1)", "l_ssd",
+		"permission denied", // the failed product is reported, the rest still shown
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("storage tab missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "File Storage (") {
+		t.Errorf("empty File Storage pane shown:\n%s", out)
+	}
+
+	// Scoped to "web": only its bucket and registry; one pane still titled.
+	m = press(m, "p")
+	out = ansi.Strip(m.render())
+	if strings.Contains(out, "pgdata") || !strings.Contains(out, "Object Storage buckets (1)") {
+		t.Errorf("scoped storage wrong:\n%s", out)
+	}
+
+	// Detail of the block volume, reached across panes.
+	m = press(m, "P")
+	m = sendKey(m, tea.KeyDown)
+	m = sendKey(m, tea.KeyDown)
+	m = sendKey(m, tea.KeyEnter)
+	out = ansi.Strip(m.render())
+	for _, want := range []string{"Block Storage volumes: pgdata", "5000 IOPS", "Attached to", "db-vm", "50.0G"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("volume detail missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestProjectDetailListsStorage(t *testing.T) {
+	m := press(loaded(t), "1")
+	m = sendKey(m, tea.KeyEnter) // web
+	if out := ansi.Strip(m.render()); !strings.Contains(out, "Object  assets  nl-ams") ||
+		!strings.Contains(out, "Registry  images  fr-par  1.5G") {
+		t.Errorf("project detail storage missing:\n%s", out)
 	}
 }

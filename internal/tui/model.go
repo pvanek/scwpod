@@ -3,6 +3,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -19,6 +20,8 @@ type Fetcher interface {
 	Projects(ctx context.Context) ([]core.Project, error)
 	Containers(ctx context.Context) ([]core.Container, error)
 	Databases(ctx context.Context) ([]core.Database, error)
+	Storage(ctx context.Context) ([]core.StorageItem, error)
+	Buckets(ctx context.Context, projectIDs []string) ([]core.StorageItem, error)
 	Users(ctx context.Context) ([]core.User, error)
 	Billing(ctx context.Context, period string, now time.Time) (core.Billing, error)
 	Metrics(ctx context.Context, containers []core.Container, dbs []core.Database, now time.Time) (core.Metrics, error)
@@ -36,12 +39,13 @@ const (
 	tabProjects
 	tabContainers
 	tabDatabases
+	tabStorage
 	tabUsers
 	tabBilling
 	tabCount
 )
 
-var tabNames = [tabCount]string{"Overview", "Projects", "Containers", "Databases", "Users", "Billing"}
+var tabNames = [tabCount]string{"Overview", "Projects", "Containers", "Databases", "Storage", "Users", "Billing"}
 
 // resource is the load state of one data set.
 type resource[T any] struct {
@@ -67,6 +71,8 @@ type Model struct {
 	projects   resource[[]core.Project]
 	containers resource[[]core.Container]
 	databases  resource[[]core.Database]
+	storage    resource[[]core.StorageItem] // all but buckets
+	buckets    resource[bucketList]
 	users      resource[[]core.User]
 	billing    resource[core.Billing]
 	metrics    resource[core.Metrics]
@@ -106,6 +112,7 @@ func (m *Model) refresh() tea.Cmd {
 	m.projects.loading = true
 	m.containers.loading = true
 	m.databases.loading = true
+	m.storage.loading = true
 	m.users.loading = true
 	m.billing.loading = true
 	now := m.now()
@@ -117,6 +124,7 @@ func (m *Model) refresh() tea.Cmd {
 		fetch(m.svc.Projects),
 		fetch(m.svc.Containers),
 		fetch(m.svc.Databases),
+		fetch(m.svc.Storage),
 		fetch(m.svc.Users),
 		fetch(func(ctx context.Context) (core.Billing, error) { return m.svc.Billing(ctx, period, now) }),
 	)
@@ -159,7 +167,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case fetched[[]core.Project]:
 		set(&m.projects, msg)
 		if msg.err == nil {
-			follow = m.fetchGrafanaURLs()
+			follow = tea.Batch(m.fetchGrafanaURLs(), m.fetchBuckets())
 		}
 		if m.scope > len(m.projects.data) {
 			m.scope = 0
@@ -179,6 +187,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case autoTickMsg:
 		follow = tea.Batch(m.onAutoTick(), autoTick())
+	case fetched[[]core.StorageItem]:
+		set(&m.storage, msg)
+	case fetched[bucketList]:
+		set(&m.buckets, msg)
 	case fetched[[]core.User]:
 		set(&m.users, msg)
 	case fetched[core.Billing]:
@@ -199,7 +211,7 @@ func (m *Model) handleKey(k string) (tea.Cmd, bool) {
 		m.setTab((m.tab + 1) % tabCount)
 	case "shift+tab", "left", "h":
 		m.setTab((m.tab + tabCount - 1) % tabCount)
-	case "0", "1", "2", "3", "4", "5":
+	case "0", "1", "2", "3", "4", "5", "6":
 		m.setTab(tab(k[0] - '0'))
 	case "p":
 		m.scope = (m.scope + 1) % (len(m.projects.data) + 1)
@@ -279,6 +291,8 @@ func (m Model) currentState() (loading bool, err error) {
 		return m.containers.loading, m.containers.err
 	case tabDatabases:
 		return m.databases.loading, m.databases.err
+	case tabStorage:
+		return m.storage.loading || m.buckets.loading, errors.Join(m.storage.err, m.buckets.err)
 	case tabUsers:
 		return m.users.loading, m.users.err
 	case tabBilling:
@@ -360,6 +374,8 @@ func (m Model) header() string {
 		b.WriteString("\n" + m.dashboardHeader())
 	case tabProjects:
 		b.WriteString("\n" + m.spendLine())
+	case tabStorage:
+		b.WriteString("\n" + m.storageLine())
 	case tabBilling:
 		b.WriteString("\n" + m.billingPanel())
 	}

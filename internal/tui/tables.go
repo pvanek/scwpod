@@ -74,7 +74,7 @@ func (m *Model) rebuildTable() {
 	}
 
 	avail := m.height - lipgloss.Height(m.header()) - 1 // footer
-	if len(data) > 1 {
+	if showPaneTitles(m.tab, len(data)) {
 		avail -= len(data) // pane titles
 	}
 	heights := splitHeights(data, max(avail, 4*len(data)))
@@ -177,7 +177,7 @@ func (m *Model) resetCursors() {
 func (m Model) panesView() string {
 	var parts []string
 	for i, p := range m.panes {
-		if len(m.panes) > 1 {
+		if showPaneTitles(m.tab, len(m.panes)) {
 			style := dim
 			if i == m.focus {
 				style = sectionStyle
@@ -187,6 +187,12 @@ func (m Model) panesView() string {
 		parts = append(parts, p.table.View())
 	}
 	return strings.Join(parts, "\n")
+}
+
+// showPaneTitles reports whether panes get a title line: when there are
+// several, and always on the Storage tab, whose panes come and go.
+func showPaneTitles(t tab, panes int) bool {
+	return panes > 1 || t == tabStorage
 }
 
 func layout(cols []col, width int) []table.Column {
@@ -249,6 +255,8 @@ func (m Model) tableData() []paneData {
 		return one("Containers", m.containerTable)
 	case tabDatabases:
 		return one("Databases", m.databaseTable)
+	case tabStorage:
+		return m.storagePanes(scope)
 	case tabUsers:
 		return one("Users", func(string) ([]col, []table.Row, []any) { return m.userTable() })
 	case tabBilling:

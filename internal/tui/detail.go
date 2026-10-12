@@ -22,7 +22,7 @@ var (
 
 // detailView is the full-screen detail of one table row.
 type detailView struct {
-	item any // core.Project, core.Container, core.Database, core.User or core.SpendLine
+	item any // core.Project, core.Container, core.Database, core.StorageItem, core.User or core.SpendLine
 	vp   viewport.Model
 }
 
@@ -75,7 +75,7 @@ func (m *Model) handleDetailKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "q", "ctrl+c", "r", "a":
 		cmd, _ := m.handleKey(k)
 		return cmd
-	case "tab", "shift+tab", "0", "1", "2", "3", "4", "5", "p", "P":
+	case "tab", "shift+tab", "0", "1", "2", "3", "4", "5", "6", "p", "P":
 		m.detail = nil
 		cmd, _ := m.handleKey(k)
 		m.rebuildTable()
@@ -116,6 +116,8 @@ func itemKey(it any) string {
 		return id("container/", v.ID)
 	case core.Database:
 		return id("database/", v.ID)
+	case core.StorageItem:
+		return id("storage/"+v.Kind+"/", v.ID)
 	case core.User:
 		return id("user/", v.ID)
 	case core.SpendLine:
@@ -132,6 +134,8 @@ func detailTitle(it any) (string, string) {
 		return "Container " + v.Name, v.ID
 	case core.Database:
 		return "Database " + v.Name, v.ID
+	case core.StorageItem:
+		return storageTitles[v.Kind] + ": " + v.Name, v.ID
 	case core.User:
 		return "User " + v.Email, v.ID
 	case core.SpendLine:
@@ -190,6 +194,8 @@ func (m Model) detailBody(it any) string {
 		m.containerDetail(s, v)
 	case core.Database:
 		m.databaseDetail(s, v)
+	case core.StorageItem:
+		m.storageDetail(s, v)
 	case core.User:
 		userDetail(s, v)
 	case core.SpendLine:
@@ -216,9 +222,18 @@ func (m Model) projectDetail(s *sheet, p core.Project) {
 			dbs = append(dbs, fmt.Sprintf("%s  %s  %s  %s", d.Name, d.Engine, d.Status, d.Region))
 		}
 	}
+	var storage []string
+	for _, st := range m.storageItems(p.ID) {
+		line := st.Kind + "  " + st.Name + "  " + st.Location
+		if st.SizeBytes > 0 {
+			line += "  " + fmtBytes(float64(st.SizeBytes))
+		}
+		storage = append(storage, line)
+	}
 	s.section("Resources")
 	s.list("Containers", conts)
 	s.list("Databases", dbs)
+	s.list("Storage", storage)
 
 	lines := core.ByProject(m.billing.data.Lines, p.ID, func(l core.SpendLine) string { return l.ProjectID })
 	total, cur := core.Spend{Lines: lines}.Total()

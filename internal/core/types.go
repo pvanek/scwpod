@@ -84,6 +84,42 @@ type User struct {
 	CreatedAt time.Time
 }
 
+// Storage kinds, in the order the Storage tab shows them.
+const (
+	StorageObject   = "Object"
+	StorageRegistry = "Registry"
+	StorageBlock    = "Block"
+	StorageLocal    = "Local"
+	StorageFile     = "File"
+)
+
+// StorageKinds lists the storage kinds in display order.
+var StorageKinds = []string{StorageObject, StorageRegistry, StorageBlock, StorageLocal, StorageFile}
+
+// StorageItem is a bucket, registry namespace, block or local volume, or
+// file system. Fields that do not apply to a kind stay empty.
+type StorageItem struct {
+	Kind          string
+	ID            string
+	Name          string
+	ProjectID     string
+	Location      string // region or zone
+	Status        string
+	StatusMessage string
+	SizeBytes     uint64 // 0 when unknown (buckets)
+	Class         string // volume type
+	IOPS          uint32 // block volume performance
+	AttachedTo    []string
+	Attachments   *int // file system mounts
+	Images        *int // registry images
+	Public        bool // registry namespace
+	Endpoint      string
+	Description   string
+	Tags          []string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
 // SpendLine is one billed consumption item for a billing period.
 type SpendLine struct {
 	ProjectID   string

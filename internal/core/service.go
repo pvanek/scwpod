@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"sort"
 	"strconv"
 	"strings"
@@ -13,10 +14,14 @@ import (
 
 	account "github.com/scaleway/scaleway-sdk-go/api/account/v3"
 	billing "github.com/scaleway/scaleway-sdk-go/api/billing/v2beta1"
+	block "github.com/scaleway/scaleway-sdk-go/api/block/v1"
 	cockpit "github.com/scaleway/scaleway-sdk-go/api/cockpit/v1"
 	container "github.com/scaleway/scaleway-sdk-go/api/container/v1"
+	file "github.com/scaleway/scaleway-sdk-go/api/file/v1alpha1"
 	iam "github.com/scaleway/scaleway-sdk-go/api/iam/v1alpha1"
+	instance "github.com/scaleway/scaleway-sdk-go/api/instance/v1"
 	rdb "github.com/scaleway/scaleway-sdk-go/api/rdb/v1"
+	registry "github.com/scaleway/scaleway-sdk-go/api/registry/v1"
 	"github.com/scaleway/scaleway-sdk-go/scw"
 )
 
@@ -30,8 +35,17 @@ type Service struct {
 	iam       *iam.API
 	billing   *billing.API
 	cockpit   *cockpit.RegionalAPI
+	registry  *registry.API
+	block     *block.API
+	instance  *instance.API
+	file      *file.API
 
 	cockpitGlobal *cockpit.GlobalAPI
+
+	// Object Storage is reached over S3 with the API key.
+	accessKey, secretKey string
+	httpClient           *http.Client
+	s3URL                func(scw.Region) string
 
 	infoMu  sync.Mutex
 	info    map[string]*SourceInfo // per Cockpit data source URL
@@ -43,6 +57,8 @@ func NewService(client *scw.Client) (*Service, error) {
 	if !ok {
 		return nil, errors.New("client has no default organization ID")
 	}
+	accessKey, _ := client.GetAccessKey()
+	secretKey, _ := client.GetSecretKey()
 	return &Service{
 		orgID:     orgID,
 		projects:  account.NewProjectAPI(client),
@@ -51,10 +67,19 @@ func NewService(client *scw.Client) (*Service, error) {
 		iam:       iam.NewAPI(client),
 		billing:   billing.NewAPI(client),
 		cockpit:   cockpit.NewRegionalAPI(client),
+		registry:  registry.NewAPI(client),
+		block:     block.NewAPI(client),
+		instance:  instance.NewAPI(client),
+		file:      file.NewAPI(client),
 		info:      map[string]*SourceInfo{},
 		grafana:   map[string]string{},
 
 		cockpitGlobal: cockpit.NewGlobalAPI(client),
+
+		accessKey:  accessKey,
+		secretKey:  secretKey,
+		httpClient: &http.Client{Timeout: 20 * time.Second},
+		s3URL:      s3URL,
 	}, nil
 }
 

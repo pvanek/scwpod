@@ -1,7 +1,7 @@
 # scwpod
 
 A terminal dashboard for your [Scaleway](https://www.scaleway.com) organization:
-serverless containers, managed databases, IAM users and spending, across all
+serverless containers, managed databases, storage, IAM users and spending, across all
 projects and regions. Runs on Linux and in Termux on Android.
 
 > Unofficial project, not affiliated with or endorsed by Scaleway.
@@ -16,6 +16,7 @@ Early scaffold. Working today:
 | Projects | Per project: containers, containers not ready, databases, month-to-date spend |
 | Containers | Serverless Containers in all regions: status, scaling, resources, endpoint |
 | Databases | Managed Databases (RDB): engine, node type, status, HA, disk, endpoint |
+| Storage | One table per kind that exists: Object Storage buckets (region, endpoint), Container Registry namespaces (access, images, size), Block Storage and Instance local volumes (type, size, attached Instance), File Storage (size, mounts). The header sums count and size per kind |
 | Users | IAM users: type, status, MFA, last login |
 | Billing | This month: consumption, discounts, tax, total and month-end forecast vs last month. Invoice history (12 months) with totals, monthly average and year to date. Spend by category. Detailed consumption lines below |
 
@@ -41,9 +42,15 @@ Required: `access_key`, `secret_key`, `default_organization_id`.
 
 Recommended: create a dedicated IAM application for scwpod with an API key, and
 give it a policy scoped to the organization that grants only **read-only**
-permission sets for Serverless Containers, Relational Databases, IAM, Billing
-and Observability. scwpod never modifies anything. A tab whose permission is
+permission sets for Serverless Containers, Relational Databases, IAM, Billing,
+Observability, Object Storage, Container Registry, Block Storage, Instances and
+File Storage. scwpod never modifies anything. A tab whose permission is
 missing shows the error and the rest keep working.
+
+Object Storage buckets are listed over the S3 protocol with the same API key,
+once per project and region, by appending `@<project ID>` to the access key;
+the key needs Object Storage read access in every project. S3 does not report
+bucket sizes, so the Storage tab shows none for buckets.
 
 ## Metrics
 
@@ -104,13 +111,13 @@ scwpod query 'avg by (resource_name) (serverless_container_cpu_usage_ratio)'
 
 | Key | Action |
 |---|---|
-| `←` `→` / `tab` / `0`–`5` | switch tab |
+| `←` `→` / `tab` / `0`–`6` | switch tab |
 | `p` / `P` | next / previous project |
 | `↑` `↓` | move in table (crosses into the next table on the Overview) / scroll detail |
 | `enter` | open detail of the selected row |
 | `esc` / `←` | back from detail |
 | `r` | refresh everything |
-| `a` | toggle auto-refresh of the current tab (Overview, Projects, Containers, Databases: every 1 min; Users, Billing: every 5 min). On by default only for Overview |
+| `a` | toggle auto-refresh of the current tab (Overview, Projects, Containers, Databases: every 1 min; Storage, Users, Billing: every 5 min). On by default only for Overview |
 | `T` | create missing Cockpit tokens (Overview) |
 | `m` / `L` | open the selected container's or database's Cockpit Grafana metrics dashboard / logs in the browser (Overview, Containers, Databases, details) |
 | `q` | quit |
