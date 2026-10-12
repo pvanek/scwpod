@@ -791,3 +791,22 @@ func TestProjectDetailListsStorage(t *testing.T) {
 		t.Errorf("project detail storage missing:\n%s", out)
 	}
 }
+
+// Each tab shows when its own data last arrived, so an auto-refresh of the
+// Overview moves its "updated" time without touching other tabs.
+func TestUpdatedTimePerTab(t *testing.T) {
+	m := loaded(t) // everything delivered at 12:00:00
+	if out := ansi.Strip(m.render()); !strings.Contains(out, "updated 12:00:00") {
+		t.Fatalf("no initial updated time:\n%s", out)
+	}
+	m.now = func() time.Time { return time.Date(2026, 10, 11, 12, 1, 30, 0, time.UTC) }
+	c, _ := fakeFetcher{}.Containers(context.Background())
+	tm, _ := m.Update(fetched[[]core.Container]{data: c})
+	m = tm.(Model)
+	if out := ansi.Strip(m.render()); !strings.Contains(out, "updated 12:01:30") {
+		t.Errorf("overview updated time not moved:\n%s", out)
+	}
+	if out := ansi.Strip(press(m, "5").render()); !strings.Contains(out, "updated 12:00:00") {
+		t.Errorf("users updated time changed by a container refresh:\n%s", out)
+	}
+}

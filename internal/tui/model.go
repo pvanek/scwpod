@@ -78,10 +78,10 @@ type Model struct {
 	metrics    resource[core.Metrics]
 	tokens     resource[tokensCreated]
 	grafana    resource[map[string]string] // Grafana URL per project ID
-	refreshed  time.Time
 
 	auto        [tabCount]bool      // auto-refresh per tab
 	lastRefresh [tabCount]time.Time // when each tab's data was last requested
+	updated     [tabCount]time.Time // when data shown on each tab last arrived
 
 	panes   []pane
 	focus   int // index of the focused pane
@@ -166,6 +166,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		set(&m.grafana, msg)
 	case fetched[[]core.Project]:
 		set(&m.projects, msg)
+		m.markUpdated(tabProjects)
 		if msg.err == nil {
 			follow = tea.Batch(m.fetchGrafanaURLs(), m.fetchBuckets())
 		}
@@ -174,12 +175,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case fetched[[]core.Container]:
 		set(&m.containers, msg)
+		m.markUpdated(tabOverview, tabProjects, tabContainers)
 		follow = m.fetchMetricsWhenReady()
 	case fetched[[]core.Database]:
 		set(&m.databases, msg)
+		m.markUpdated(tabOverview, tabProjects, tabDatabases)
 		follow = m.fetchMetricsWhenReady()
 	case fetched[core.Metrics]:
 		set(&m.metrics, msg)
+		m.markUpdated(tabOverview, tabContainers, tabDatabases)
 	case fetched[tokensCreated]:
 		set(&m.tokens, msg)
 		if msg.err == nil {
@@ -189,18 +193,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		follow = tea.Batch(m.onAutoTick(), autoTick())
 	case fetched[[]core.StorageItem]:
 		set(&m.storage, msg)
+		m.markUpdated(tabStorage)
 	case fetched[bucketList]:
 		set(&m.buckets, msg)
+		m.markUpdated(tabStorage)
 	case fetched[[]core.User]:
 		set(&m.users, msg)
+		m.markUpdated(tabUsers)
 	case fetched[core.Billing]:
 		set(&m.billing, msg)
-		m.refreshed = m.now()
+		m.markUpdated(tabProjects, tabBilling)
 	default:
 		return m, nil
 	}
 	m.rebuildTable()
 	return m, follow
+}
+
+// markUpdated records that data shown on the given tabs just arrived.
+func (m *Model) markUpdated(tabs ...tab) {
+	now := m.now()
+	for _, t := range tabs {
+		m.updated[t] = now
+	}
 }
 
 func (m *Model) handleKey(k string) (tea.Cmd, bool) {
@@ -350,8 +365,8 @@ func (m Model) statusBar(hints string) string {
 	const right = "q quit"
 	width := max(m.width, 20)
 	state := m.autoLabel()
-	if !m.refreshed.IsZero() {
-		if updated := state + " · updated " + m.refreshed.Format("15:04:05"); lipgloss.Width(updated)+len(right)+8 <= width {
+	if t := m.updated[m.tab]; !t.IsZero() {
+		if updated := state + " · updated " + t.Format("15:04:05"); lipgloss.Width(updated)+len(right)+8 <= width {
 			state = updated
 		}
 	}
