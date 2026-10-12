@@ -69,8 +69,11 @@ provides the underlying metrics. Container metrics are picked from the
 code label on the request counter and the latency a duration histogram.
 
 Containers and databases link to their Cockpit Grafana dashboards: in the
-Overview tables the name opens the metrics dashboard and the Logs column the
-logs; details have both too. The links are clickable in terminals that
+Overview tables the name and the Metrics column open the metrics dashboard and
+the Logs column the logs (the columns show from 100 columns wide). Details
+show both full URLs, so terminals that detect plain URLs can open them (a URL
+wrapped onto several lines is detected only in parts, though) and any terminal
+can copy them. The links are clickable in terminals that
 support OSC 8 hyperlinks (in Konsole enable *Edit Current Profile → Mouse →
 Allow escape sequences for links*); `m` and `L` open them with
 `termux-open-url`, `xdg-open` or `open`. Container dashboards are filtered by Cockpit's name for

@@ -137,9 +137,10 @@ func fmtDuration(d time.Duration) string {
 // minColWidth is the narrowest a dashboard column may get, padding included.
 const minColWidth = 8
 
-// minWidthForLogs is the screen width from which the Overview tables get a
-// Logs link column; narrower screens use the L key.
-const minWidthForLogs = 90
+// minWidthForLinks is the screen width from which the Overview tables get
+// Metrics and Logs link columns; narrower screens use the name link and the
+// m and L keys.
+const minWidthForLinks = 100
 
 // metricCol is one metric shown for a resource type: a number in an
 // Overview table column and a chart in the detail view.
@@ -188,9 +189,9 @@ func (m Model) metricTable(title string, fixed []col, metrics []metricCol, n int
 	for _, mc := range metrics {
 		cols = append(cols, col{mc.title, mc.min, mc.weight})
 	}
-	logsCol := m.width >= minWidthForLogs
-	if logsCol {
-		cols = append(cols, col{"Logs", 6, 0})
+	linkCols := m.width >= minWidthForLinks
+	if linkCols {
+		cols = append(cols, col{"Metrics", 9, 0}, col{"Logs", 6, 0})
 	}
 	d := paneData{title: title, cols: cols}
 	for i := range n {
@@ -201,12 +202,8 @@ func (m Model) metricTable(title string, fixed []col, metrics []metricCol, n int
 		for _, mc := range metrics {
 			cells = append(cells, metricCell(rm, mc))
 		}
-		if logsCol {
-			logs := "–"
-			if links.Logs != "" {
-				logs = linkCell("logs ↗", links.Logs)
-			}
-			cells = append(cells, logs)
+		if linkCols {
+			cells = append(cells, linkOrDash("metrics ↗", links.Metrics), linkOrDash("logs ↗", links.Logs))
 		}
 		d.rows = append(d.rows, table.Row(cells))
 		d.items = append(d.items, item)

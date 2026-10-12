@@ -657,6 +657,17 @@ func TestDatabaseDetailLinks(t *testing.T) {
 		!strings.Contains(out, "var-resource_name=pg-main") {
 		t.Errorf("no database dashboard link in:\n%q", out)
 	}
+
+	// The full URL is shown as text; wrapped, every line links the whole URL.
+	m = resize(m, 80, 60)
+	out = m.render()
+	logs := m.links(m.detail.item).Logs
+	if !strings.Contains(ansi.Strip(out), "https://p2.dashboard.example/explore?left=") {
+		t.Errorf("logs URL not shown:\n%s", ansi.Strip(out))
+	}
+	if n := strings.Count(out, "\x1b]8;;"+logs+"\a"); n < 2 {
+		t.Errorf("wrapped logs URL has %d linked lines, want several", n)
+	}
 }
 
 func TestOverviewTableLinks(t *testing.T) {
@@ -676,8 +687,9 @@ func TestOverviewTableLinks(t *testing.T) {
 	if !strings.Contains(out, "\x1b]8;;https://p2.dashboard.example/d/scw-rdb-postgresql-overview/") {
 		t.Errorf("database name is not a metrics link")
 	}
-	if !strings.Contains(ansi.Strip(out), "logs ↗") || !strings.Contains(ansi.Strip(out), "m metrics · L logs") {
-		t.Errorf("logs column or key hints missing:\n%s", ansi.Strip(out))
+	if !strings.Contains(ansi.Strip(out), "metrics ↗") || !strings.Contains(ansi.Strip(out), "logs ↗") ||
+		!strings.Contains(ansi.Strip(out), "m metrics · L logs") {
+		t.Errorf("link columns or key hints missing:\n%s", ansi.Strip(out))
 	}
 
 	// m/L open the selected row's links without a detail.
@@ -689,9 +701,9 @@ func TestOverviewTableLinks(t *testing.T) {
 		t.Errorf("opened %v", opened)
 	}
 
-	// Narrow screens drop the Logs column but keep the name links.
+	// Narrow screens drop the link columns but keep the name links.
 	m = resize(m, 60, 30)
-	if out := m.render(); strings.Contains(ansi.Strip(out), "logs ↗") || !strings.Contains(out, "\x1b]8;;") {
+	if out := m.render(); strings.Contains(ansi.Strip(out), "metrics ↗") || strings.Contains(ansi.Strip(out), "logs ↗") || !strings.Contains(out, "\x1b]8;;") {
 		t.Errorf("narrow layout wrong:\n%s", ansi.Strip(out))
 	}
 

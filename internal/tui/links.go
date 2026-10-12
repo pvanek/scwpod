@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os/exec"
 	"runtime"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -14,7 +15,7 @@ import (
 )
 
 // Containers and databases link to their Cockpit Grafana dashboards, in the
-// Overview tables (name: metrics, Logs column) and in detail views. The
+// Overview tables (name and Metrics column: metrics, Logs column) and in detail views. The
 // links are OSC 8 hyperlinks, clickable in most terminals; "m" and "L" open
 // them in the browser for terminals without hyperlink support (or Konsole
 // without "Allow escape sequences for links").
@@ -31,6 +32,14 @@ func linkCell(text, url string) string {
 		return text
 	}
 	return ansi.SetHyperlink(url) + "\x1b[4m" + text + "\x1b[24m" + ansi.ResetHyperlink()
+}
+
+// linkOrDash is a link cell, or a dash when there is no URL.
+func linkOrDash(text, url string) string {
+	if url == "" {
+		return "–"
+	}
+	return linkCell(text, url)
 }
 
 func (m *Model) fetchGrafanaURLs() tea.Cmd {
@@ -61,11 +70,20 @@ func (m Model) linksSection(s *sheet, item any) {
 		return
 	}
 	s.section("Cockpit (Grafana)")
+	// The full URL is shown so terminals without OSC 8 hyperlinks can still
+	// detect or copy it. It is broken into lines that fit, each also a link
+	// to the whole URL, since a wrapped plain URL is no longer clickable.
+	width := max(s.width-labelWidth-1, 10)
 	link := func(label, key, url, note string) {
 		if url == "" {
 			return
 		}
-		s.field(label, linkStyle.Hyperlink(url).Render("open ↗")+dim.Render("  "+key+note))
+		lines := strings.Split(ansi.Hardwrap(url, width, false), "\n")
+		for i, line := range lines {
+			lines[i] = linkStyle.Hyperlink(url).Render(line)
+		}
+		s.field(label, strings.Join(lines, "\n"))
+		s.field("", dim.Render("press "+key+" to open"+note))
 	}
 	note := ""
 	if c, ok := item.(core.Container); ok && m.metrics.data.Names[c.ID] == "" {
