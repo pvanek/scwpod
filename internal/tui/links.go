@@ -8,6 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/pvanek/scwpod/internal/core"
 )
@@ -18,19 +19,18 @@ import (
 // them in the browser for terminals without hyperlink support (or Konsole
 // without "Allow escape sequences for links").
 
-var (
-	linkStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Underline(true)
-	// cellLink has no colour so it stays readable in a highlighted row.
-	cellLink = lipgloss.NewStyle().Underline(true)
-)
+var linkStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Underline(true)
 
 // linkCell makes table cell text a clickable link; text without a URL is
 // returned as is. The table keeps the link intact when it shortens a cell.
+// It is only underlined, with no colour, so it stays readable in a highlighted
+// row. It turns just the underline off again rather than resetting all
+// attributes as lipgloss does, which would cut off the row's highlight.
 func linkCell(text, url string) string {
 	if url == "" {
 		return text
 	}
-	return cellLink.Hyperlink(url).Render(text)
+	return ansi.SetHyperlink(url) + "\x1b[4m" + text + "\x1b[24m" + ansi.ResetHyperlink()
 }
 
 func (m *Model) fetchGrafanaURLs() tea.Cmd {

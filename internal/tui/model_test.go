@@ -701,3 +701,12 @@ func TestOverviewTableLinks(t *testing.T) {
 		t.Error("m handled on the Users tab")
 	}
 }
+
+// A link cell must not reset all attributes, or it cuts off the
+// highlight of the selected row after the first link.
+func TestLinkCellKeepsHighlight(t *testing.T) {
+	row := tableStyles(true).Selected.Render("a " + linkCell("name", "https://example.com") + " b")
+	if strings.Count(row, "\x1b[m") != 1 || !strings.HasSuffix(row, "\x1b[m") {
+		t.Errorf("highlight reset inside the row: %q", row)
+	}
+}
