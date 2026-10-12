@@ -7,16 +7,26 @@ import (
 	"charm.land/bubbles/v2/table"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/pvanek/scwpod/internal/core"
 )
 
-// col is a column with a minimum width and a share of any leftover width.
+// col is a column with a minimum width, a share of any leftover width and
+// an alignment: numbers right, text left.
 type col struct {
 	title  string
 	min    int
 	weight int
+	align  align
 }
+
+type align bool
+
+const (
+	left  align = false
+	right align = true
+)
 
 // pane is one table on screen. Most tabs have one; the Overview has one per
 // resource type.
@@ -87,14 +97,16 @@ func (m *Model) rebuildTable() {
 		// resets the cursor, so restore it afterwards.
 		cursor := p.table.Cursor()
 		p.table.SetRows(nil)
-		p.table.SetColumns(layout(d.cols, m.width))
-		p.table.SetRows(d.rows)
+		cols := layout(d.cols, m.width)
+		p.table.SetColumns(cols)
+		p.table.SetRows(alignRows(d.cols, cols, d.rows))
 		p.table.SetCursor(cursor)
 		p.table.SetWidth(max(m.width, 20))
 		p.table.SetHeight(heights[i])
 		p.table.SetStyles(tableStyles(i == m.focus))
 	}
 	m.syncDetail()
+	m.syncHelp()
 }
 
 // splitHeights gives each pane its rows plus header (2 lines) if everything
@@ -236,9 +248,36 @@ func layout(cols []col, width int) []table.Column {
 	}
 	out := make([]table.Column, len(cols))
 	for i, c := range cols {
-		out[i] = table.Column{Title: c.title, Width: widths[i]}
+		out[i] = table.Column{Title: alignCell(c.title, widths[i], c.align), Width: widths[i]}
 	}
 	return out
+}
+
+// alignRows right-aligns the cells of right-aligned columns; the table
+// itself only aligns left.
+func alignRows(cols []col, laid []table.Column, rows []table.Row) []table.Row {
+	out := make([]table.Row, len(rows))
+	for r, row := range rows {
+		out[r] = make(table.Row, len(row))
+		for i, v := range row {
+			if i < len(cols) && i < len(laid) {
+				v = alignCell(v, laid[i].Width, cols[i].align)
+			}
+			out[r][i] = v
+		}
+	}
+	return out
+}
+
+// alignCell pads text on the left to width when right-aligned. Text too
+// wide is left as is for the table to shorten.
+func alignCell(s string, width int, a align) string {
+	if a == right {
+		if w := ansi.StringWidth(s); w < width {
+			return strings.Repeat(" ", width-w) + s
+		}
+	}
+	return s
 }
 
 // tableData returns the panes of the active tab.
@@ -268,8 +307,8 @@ func (m Model) tableData() []paneData {
 
 func (m Model) projectsTable(scope string) ([]col, []table.Row, []any) {
 	cols := []col{
-		{"Project", 12, 3}, {"Containers", 10, 1}, {"Not ready", 9, 1},
-		{"Databases", 9, 1}, {"Spend MTD", 12, 1},
+		{"Project", 12, 1, left}, {"Containers", 10, 0, right}, {"Not ready", 9, 0, right},
+		{"Databases", 9, 0, right}, {"Spend MTD", 12, 0, right},
 	}
 	spend := map[string]core.ProjectTotal{}
 	for _, t := range m.billing.data.TotalsByProject() {
@@ -308,8 +347,8 @@ func (m Model) projectsTable(scope string) ([]col, []table.Row, []any) {
 
 func (m Model) containerTable(scope string) ([]col, []table.Row, []any) {
 	cols := []col{
-		{"Name", 12, 3}, {"Project", 10, 2}, {"Region", 7, 0}, {"Status", 10, 0},
-		{"Scale", 6, 0}, {"vCPU/Mem", 12, 0}, {"Endpoint", 10, 4},
+		{"Name", 12, 3, left}, {"Project", 10, 2, left}, {"Region", 7, 0, left}, {"Status", 10, 0, left},
+		{"Scale", 6, 0, right}, {"vCPU/Mem", 12, 0, right}, {"Endpoint", 10, 4, left},
 	}
 	var (
 		rows  []table.Row
@@ -329,8 +368,8 @@ func (m Model) containerTable(scope string) ([]col, []table.Row, []any) {
 
 func (m Model) databaseTable(scope string) ([]col, []table.Row, []any) {
 	cols := []col{
-		{"Name", 12, 3}, {"Project", 10, 2}, {"Region", 7, 0}, {"Engine", 11, 1},
-		{"Node", 10, 1}, {"Status", 8, 0}, {"HA", 3, 0}, {"Disk", 6, 0}, {"Endpoint", 10, 3},
+		{"Name", 12, 3, left}, {"Project", 10, 2, left}, {"Region", 7, 0, left}, {"Engine", 11, 1, left},
+		{"Node", 10, 1, left}, {"Status", 8, 0, left}, {"HA", 3, 0, left}, {"Disk", 6, 0, right}, {"Endpoint", 10, 3, left},
 	}
 	var (
 		rows  []table.Row
@@ -348,8 +387,8 @@ func (m Model) databaseTable(scope string) ([]col, []table.Row, []any) {
 
 func (m Model) userTable() ([]col, []table.Row, []any) {
 	cols := []col{
-		{"Email", 16, 4}, {"Username", 10, 2}, {"Type", 6, 0}, {"Status", 9, 0},
-		{"MFA", 3, 0}, {"Last login", 16, 0},
+		{"Email", 16, 4, left}, {"Username", 10, 2, left}, {"Type", 6, 0, left}, {"Status", 9, 0, left},
+		{"MFA", 3, 0, left}, {"Last login", 16, 0, left},
 	}
 	var (
 		rows  []table.Row
@@ -368,8 +407,8 @@ func (m Model) userTable() ([]col, []table.Row, []any) {
 
 func (m Model) billingTable(scope string) ([]col, []table.Row, []any) {
 	cols := []col{
-		{"Project", 10, 2}, {"Category", 10, 2}, {"Product", 12, 3},
-		{"Resource", 10, 3}, {"Quantity", 10, 1}, {"Amount", 12, 0},
+		{"Project", 10, 2, left}, {"Category", 10, 2, left}, {"Product", 12, 3, left},
+		{"Resource", 10, 3, left}, {"Quantity", 10, 1, right}, {"Amount", 12, 0, right},
 	}
 	var (
 		rows  []table.Row

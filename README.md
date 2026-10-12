@@ -82,7 +82,7 @@ show both full URLs, so terminals that detect plain URLs can open them (a URL
 wrapped onto several lines is detected only in parts, though) and any terminal
 can copy them. The links are clickable in terminals that
 support OSC 8 hyperlinks (in Konsole enable *Edit Current Profile → Mouse →
-Allow escape sequences for links*); `m` and `L` open them with
+Allow escape sequences for links*); `m` and `l` open them with
 `termux-open-url`, `xdg-open` or `open`. Container dashboards are filtered by Cockpit's name for
 the container, learned from the `serverless_container_info` metric, so they
 need a Cockpit token; database logs open in Grafana Explore.
@@ -111,6 +111,7 @@ scwpod query 'avg by (resource_name) (serverless_container_cpu_usage_ratio)'
 
 | Key | Action |
 |---|---|
+| `F1` / `?` | show all keys |
 | `←` `→` / `tab` / `0`–`6` | switch tab |
 | `p` / `P` | next / previous project |
 | `↑` `↓` | move in table (crosses into the next table on the Overview) / scroll detail |
@@ -119,7 +120,7 @@ scwpod query 'avg by (resource_name) (serverless_container_cpu_usage_ratio)'
 | `r` | refresh everything |
 | `a` | toggle auto-refresh of the current tab (Overview, Projects, Containers, Databases: every 1 min; Storage, Users, Billing: every 5 min). On by default only for Overview |
 | `T` | create missing Cockpit tokens (Overview) |
-| `m` / `L` | open the selected container's or database's Cockpit Grafana metrics dashboard / logs in the browser (Overview, Containers, Databases, details) |
+| `m` / `l` | open the selected container's or database's Cockpit Grafana metrics dashboard / logs in the browser (Overview, Containers, Databases, details) |
 | `q` | quit |
 
 ## Architecture

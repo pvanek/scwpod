@@ -69,8 +69,11 @@ func (m *Model) handleDetailKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "m":
 		m.openLink("metrics")
 		return nil
-	case "L":
+	case "l", "L":
 		m.openLink("logs")
+		return nil
+	case "f1", "?":
+		m.openHelp()
 		return nil
 	case "q", "ctrl+c", "r", "a":
 		cmd, _ := m.handleKey(k)
@@ -97,7 +100,7 @@ func (m Model) renderDetail() string {
 		m.scopeLine(),
 		titleLine,
 		m.detail.vp.View(),
-		m.statusBar("esc back · ↑/↓ scroll · m metrics · L logs · r refresh"),
+		m.statusBar("F1 help · esc back · ↑/↓ scroll · m open metrics · l open logs · r refresh"),
 	}, "\n")
 }
 

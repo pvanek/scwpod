@@ -16,7 +16,7 @@ import (
 
 // Containers and databases link to their Cockpit Grafana dashboards, in the
 // Overview tables (name and Metrics column: metrics, Logs column) and in detail views. The
-// links are OSC 8 hyperlinks, clickable in most terminals; "m" and "L" open
+// links are OSC 8 hyperlinks, clickable in most terminals; "m" and "l" open
 // them in the browser for terminals without hyperlink support (or Konsole
 // without "Allow escape sequences for links").
 
@@ -90,7 +90,7 @@ func (m Model) linksSection(s *sheet, item any) {
 		note = " · not filtered: container name in Cockpit unknown"
 	}
 	link("Metrics dashboard", "m", l.Metrics, note)
-	link("Logs", "L", l.Logs, note)
+	link("Logs", "l", l.Logs, note)
 }
 
 // opener starts the system browser; replaced in tests.

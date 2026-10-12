@@ -86,7 +86,8 @@ type Model struct {
 	panes   []pane
 	focus   int // index of the focused pane
 	detail  *detailView
-	openErr error // last failure to open a link in the browser
+	help    *helpView // over everything else when open
+	openErr error     // last failure to open a link in the browser
 	spinner spinner.Model
 }
 
@@ -149,6 +150,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 	case tea.KeyPressMsg:
+		if m.help != nil {
+			return m, m.handleHelpKey(msg)
+		}
 		if m.detail != nil {
 			return m, m.handleDetailKey(msg)
 		}
@@ -222,7 +226,7 @@ func (m *Model) handleKey(k string) (tea.Cmd, bool) {
 	switch k {
 	case "q", "ctrl+c":
 		return tea.Quit, true
-	case "tab", "right", "l":
+	case "tab", "right":
 		m.setTab((m.tab + 1) % tabCount)
 	case "shift+tab", "left", "h":
 		m.setTab((m.tab + tabCount - 1) % tabCount)
@@ -241,9 +245,11 @@ func (m *Model) handleKey(k string) (tea.Cmd, bool) {
 		m.openDetail()
 	case "T":
 		return m.createTokens(), true
+	case "f1", "?":
+		m.openHelp()
 	case "a":
 		return m.toggleAuto(), true
-	case "m", "L":
+	case "m", "l", "L":
 		switch m.tab {
 		case tabOverview, tabContainers, tabDatabases:
 			if k == "m" {
@@ -341,6 +347,9 @@ func (m Model) View() tea.View {
 }
 
 func (m Model) render() string {
+	if m.help != nil {
+		return m.renderHelp()
+	}
 	if m.detail != nil {
 		return m.renderDetail()
 	}
@@ -350,10 +359,10 @@ func (m Model) render() string {
 
 // listHints are the key hints for table screens.
 func (m Model) listHints() string {
-	h := "←/→ tab · p/P project · ↑/↓ move · enter detail"
+	h := "F1 help · ←/→ tab · p/P project · ↑/↓ move · enter detail"
 	switch m.tab {
 	case tabOverview, tabContainers, tabDatabases:
-		h += " · m metrics · L logs"
+		h += " · m open metrics · l open logs"
 	}
 	return h + " · r refresh"
 }

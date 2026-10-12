@@ -70,7 +70,7 @@ func (m Model) storagePanes(scope string) []paneData {
 	}
 	if len(out) == 0 {
 		out = append(out, paneData{title: "Storage", cols: []col{
-			{"Name", 12, 3}, {"Project", 10, 2}, {"Location", 8, 0}, {"Status", 9, 0}, {"Size", 7, 0},
+			{"Name", 12, 3, left}, {"Project", 10, 2, left}, {"Location", 8, 0, left}, {"Status", 9, 0, left}, {"Size", 7, 0, right},
 		}})
 	}
 	return out
@@ -85,29 +85,29 @@ var storageTitles = map[string]string{
 }
 
 func (m Model) storagePane(kind string, items []core.StorageItem) paneData {
-	name, project := col{"Name", 12, 3}, col{"Project", 10, 2}
-	status, size := col{"Status", 9, 0}, col{"Size", 7, 0}
+	name, project := col{"Name", 12, 3, left}, col{"Project", 10, 2, left}
+	status, size := col{"Status", 9, 0, left}, col{"Size", 7, 0, right}
 	var cols []col
 	var row func(s core.StorageItem) []string
 	switch kind {
 	case core.StorageObject:
-		cols = []col{{"Name", 12, 2}, project, {"Region", 7, 0}, {"Created", 16, 0}, {"Endpoint", 10, 4}}
+		cols = []col{{"Name", 12, 2, left}, project, {"Region", 7, 0, left}, {"Created", 16, 0, left}, {"Endpoint", 10, 4, left}}
 		row = func(s core.StorageItem) []string {
 			return []string{s.Name, m.projectName(s.ProjectID), s.Location, timeStr(s.CreatedAt), s.Endpoint}
 		}
 	case core.StorageRegistry:
-		cols = []col{name, project, {"Region", 7, 0}, status, {"Access", 7, 0}, {"Images", 6, 0}, size, {"Endpoint", 10, 3}}
+		cols = []col{name, project, {"Region", 7, 0, left}, status, {"Access", 7, 0, left}, {"Images", 6, 0, right}, size, {"Endpoint", 10, 3, left}}
 		row = func(s core.StorageItem) []string {
 			return []string{s.Name, m.projectName(s.ProjectID), s.Location, s.Status, visibility(s.Public),
 				countStr(s.Images), sizeStr(s.SizeBytes), s.Endpoint}
 		}
 	case core.StorageFile:
-		cols = []col{name, project, {"Region", 7, 0}, status, size, {"Mounts", 6, 0}}
+		cols = []col{name, project, {"Region", 7, 0, left}, status, size, {"Mounts", 6, 0, right}}
 		row = func(s core.StorageItem) []string {
 			return []string{s.Name, m.projectName(s.ProjectID), s.Location, s.Status, sizeStr(s.SizeBytes), countStr(s.Attachments)}
 		}
 	default: // block and local volumes
-		cols = []col{name, project, {"Zone", 8, 0}, status, {"Type", 8, 0}, size, {"Attached to", 11, 2}}
+		cols = []col{name, project, {"Zone", 8, 0, left}, status, {"Type", 8, 0, left}, size, {"Attached to", 11, 2, left}}
 		row = func(s core.StorageItem) []string {
 			return []string{s.Name, m.projectName(s.ProjectID), s.Location, s.Status, s.Class,
 				sizeStr(s.SizeBytes), strings.Join(s.AttachedTo, ", ")}

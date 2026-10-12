@@ -187,11 +187,11 @@ func (m Model) metricTable(title string, fixed []col, metrics []metricCol, n int
 	}
 	cols := append([]col(nil), fixed...)
 	for _, mc := range metrics {
-		cols = append(cols, col{mc.title, mc.min, mc.weight})
+		cols = append(cols, col{mc.title, mc.min, mc.weight, right})
 	}
 	linkCols := m.width >= minWidthForLinks
 	if linkCols {
-		cols = append(cols, col{"Metrics", 9, 0}, col{"Logs", 6, 0})
+		cols = append(cols, col{"Metrics", 9, 0, left}, col{"Logs", 6, 0, left})
 	}
 	d := paneData{title: title, cols: cols}
 	for i := range n {
@@ -235,14 +235,14 @@ func (m Model) dashboardPanes(scope string) []paneData {
 	dbs := core.ByProject(m.databases.data, scope, func(d core.Database) string { return d.ProjectID })
 	return []paneData{
 		m.metricTable("Containers",
-			[]col{{"Name", 10, 2}, {"Project", 8, 1}, {"Status", 10, 0}},
+			[]col{{"Name", 10, 2, left}, {"Project", 8, 1, left}, {"Status", 10, 0, left}},
 			containerMetricCols, len(containers),
 			func(i int) ([]string, core.ResourceMetrics, any) {
 				c := containers[i]
 				return []string{c.Name, m.projectName(c.ProjectID), m.containerState(c)}, m.containerMetrics(c), c
 			}),
 		m.metricTable("Databases",
-			[]col{{"Name", 10, 2}, {"Project", 8, 1}, {"Engine", 6, 0}, {"Status", 7, 0}},
+			[]col{{"Name", 10, 2, left}, {"Project", 8, 1, left}, {"Engine", 6, 0, left}, {"Status", 7, 0, left}},
 			databaseMetricCols, len(dbs),
 			func(i int) ([]string, core.ResourceMetrics, any) {
 				d := dbs[i]

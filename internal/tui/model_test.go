@@ -523,7 +523,7 @@ func TestNarrowOverviewKeepsShortValuesWhole(t *testing.T) {
 }
 
 func TestLayoutShrinksFlexibleColumnsFirst(t *testing.T) {
-	cols := []col{{"Name", 10, 2}, {"Status", 10, 0}, {"CPU", 5, 1}}
+	cols := []col{{"Name", 10, 2, left}, {"Status", 10, 0, left}, {"CPU", 5, 1, right}}
 	got := layout(cols, 2*3+20) // 5 short of the 25 minimum
 	if got[1].Width != 10 {
 		t.Errorf("fixed Status column shrunk to %d", got[1].Width)
@@ -626,7 +626,7 @@ func TestStatusBar(t *testing.T) {
 	m := resize(loaded(t), 100, 30)
 	m = sendKey(m, tea.KeyEnter)
 	lines := strings.Split(m.render(), "\n")
-	if bar := ansiStrip(lines[len(lines)-1]); !strings.HasPrefix(bar, "esc back") || !strings.HasSuffix(bar, "q quit") {
+	if bar := ansiStrip(lines[len(lines)-1]); !strings.HasPrefix(bar, "F1 help · esc back") || !strings.HasSuffix(bar, "q quit") {
 		t.Errorf("detail bar = %q", bar)
 	}
 }
@@ -709,7 +709,7 @@ func TestOverviewTableLinks(t *testing.T) {
 		t.Errorf("database name is not a metrics link")
 	}
 	if !strings.Contains(ansi.Strip(out), "metrics ↗") || !strings.Contains(ansi.Strip(out), "logs ↗") ||
-		!strings.Contains(ansi.Strip(out), "m metrics · L logs") {
+		!strings.Contains(ansi.Strip(out), "m open metrics · l open logs") {
 		t.Errorf("link columns or key hints missing:\n%s", ansi.Strip(out))
 	}
 
@@ -808,5 +808,65 @@ func TestUpdatedTimePerTab(t *testing.T) {
 	}
 	if out := ansi.Strip(press(m, "5").render()); !strings.Contains(out, "updated 12:00:00") {
 		t.Errorf("users updated time changed by a container refresh:\n%s", out)
+	}
+}
+
+// Numbers are right-aligned under right-aligned headers, text left.
+func TestNumbersAlignRight(t *testing.T) {
+	m := press(loaded(t), "1")
+	out := ansi.Strip(m.render())
+	var header, row string
+	for _, l := range strings.Split(out, "\n") {
+		switch {
+		case strings.Contains(l, "Spend MTD"):
+			header = l
+		case strings.HasPrefix(l, " web "):
+			row = l
+		}
+	}
+	// The amount ends where its header ends; the name starts where its header starts.
+	if end := strings.Index(header, "Spend MTD") + len("Spend MTD"); strings.Index(row, "3.00 EUR")+len("3.00 EUR") != end {
+		t.Errorf("amount not right-aligned:\n%s\n%s", header, row)
+	}
+	if strings.Index(row, "web") != strings.Index(header, "Project") {
+		t.Errorf("name not left-aligned:\n%s\n%s", header, row)
+	}
+}
+
+func TestLowercaseLOpensLogs(t *testing.T) {
+	var opened []string
+	defer func(orig func(string) error) { opener = orig }(opener)
+	opener = func(url string) error { opened = append(opened, url); return nil }
+
+	m := loaded(t)
+	tm, _ := m.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
+	if m = tm.(Model); m.tab != tabOverview || len(opened) != 1 || !strings.Contains(opened[0], "logs") {
+		t.Errorf("l: tab=%d opened=%v", m.tab, opened)
+	}
+}
+
+func TestHelpWindow(t *testing.T) {
+	m := resize(loaded(t), 100, 40)
+	tm, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyF1})
+	m = tm.(Model)
+	out := ansi.Strip(m.render())
+	for _, want := range []string{"Keys", "Navigation", "Actions", "open the metrics dashboard", "l · L", "F1 · ?", "esc close"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("help missing %q:\n%s", want, out)
+		}
+	}
+	// Keys do not reach the tables while help is open; q closes it, not the app.
+	tm, cmd := m.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
+	m = tm.(Model)
+	if m.help != nil || cmd != nil {
+		t.Errorf("q did not just close help: help=%v cmd=%v", m.help != nil, cmd != nil)
+	}
+
+	// From a detail, closing help returns to the detail.
+	m = sendKey(m, tea.KeyEnter)
+	tm, _ = m.Update(tea.KeyPressMsg{Code: '?', Text: "?"})
+	tm, _ = tm.(Model).Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	if m = tm.(Model); m.help != nil || m.detail == nil {
+		t.Errorf("help from detail: help=%v detail=%v", m.help != nil, m.detail != nil)
 	}
 }
