@@ -6,6 +6,8 @@ projects and regions. Runs on Linux and in Termux on Android.
 
 > Unofficial project, not affiliated with or endorsed by Scaleway.
 
+![Overview: status, CPU, memory, requests and metrics/logs links of containers and databases across all projects](docs/scwpod_01.png)
+
 ## Status
 
 Early scaffold. Working today:
