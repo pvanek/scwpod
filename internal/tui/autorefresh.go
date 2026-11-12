@@ -16,6 +16,7 @@ import (
 var autoIntervals = [tabCount]time.Duration{
 	tabOverview:   time.Minute,
 	tabProjects:   time.Minute,
+	tabInstances:  time.Minute,
 	tabContainers: time.Minute,
 	tabDatabases:  time.Minute,
 	tabStorage:    5 * time.Minute,
@@ -51,8 +52,8 @@ func (m *Model) toggleAuto() tea.Cmd {
 	return nil
 }
 
-// refreshTab fetches the data shown on tab t. Container and database
-// refreshes also refresh their metrics once both lists have arrived.
+// refreshTab fetches the data shown on tab t. Container, database and
+// Instance refreshes also refresh metrics once the lists have arrived.
 func (m *Model) refreshTab(t tab) tea.Cmd {
 	m.lastRefresh[t] = m.now()
 	var cmds []tea.Cmd
@@ -64,6 +65,10 @@ func (m *Model) refreshTab(t tab) tea.Cmd {
 		m.databases.loading = true
 		cmds = append(cmds, fetch(m.svc.Databases))
 	}
+	instances := func() {
+		m.instances.loading = true
+		cmds = append(cmds, fetch(m.svc.Instances))
+	}
 	billing := func() {
 		m.billing.loading = true
 		now := m.now()
@@ -72,8 +77,12 @@ func (m *Model) refreshTab(t tab) tea.Cmd {
 	}
 
 	switch t {
-	case tabOverview, tabContainers, tabDatabases:
-		// Metrics need both lists, so both are refreshed.
+	case tabOverview:
+		// Metrics are fetched once all three lists are in.
+		containers()
+		databases()
+		instances()
+	case tabContainers, tabDatabases:
 		containers()
 		databases()
 	case tabProjects:
@@ -81,7 +90,10 @@ func (m *Model) refreshTab(t tab) tea.Cmd {
 		cmds = append(cmds, fetch(m.svc.Projects))
 		containers()
 		databases()
+		instances()
 		billing()
+	case tabInstances:
+		instances()
 	case tabStorage:
 		m.storage.loading = true
 		cmds = append(cmds, fetch(m.svc.Storage), m.fetchBuckets())

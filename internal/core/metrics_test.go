@@ -258,11 +258,12 @@ func TestMetricsReportsMissingTokensForDatabases(t *testing.T) {
 			{ID: "d1", ProjectID: "p2", Region: "nl-ams", Engine: "PostgreSQL-16", Status: "ready"},
 			{ID: "d2", ProjectID: "p3", Region: "fr-par", Engine: "Redis-7", Status: "ready"},
 		},
+		[]Instance{{ID: "i1", ProjectID: "p4", Zone: "pl-waw-2"}},
 		noTokens{}, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []ProjectRegion{{"p1", "fr-par"}, {"p2", "nl-ams"}}
+	want := []ProjectRegion{{"p1", "fr-par"}, {"p2", "nl-ams"}, {"p4", "pl-waw"}}
 	if !reflect.DeepEqual(got.MissingTokens, want) {
 		t.Errorf("missing = %v, want %v", got.MissingTokens, want)
 	}
@@ -322,5 +323,94 @@ func TestDatabaseLinks(t *testing.T) {
 	}
 	if parsed.Path != "/explore" || left.Datasource != "Scaleway Logs" || left.Queries[0].Expr != `{resource_name="shop-dev-pg"}` {
 		t.Errorf("logs link %s -> %+v", l.Logs, left)
+	}
+}
+
+func TestInstanceQueriesCounters(t *testing.T) {
+	info := infoWith("",
+		"instance_server_cpu_seconds_total",
+		"instance_server_memory_available_bytes", "instance_server_memory_total_bytes",
+		"instance_server_disk_read_bytes_total", "instance_server_disk_write_bytes_total",
+		"instance_server_disk_read_ops_total",
+		"instance_server_network_receive_bytes_total",
+		"rdb_instance_postgresql_node_cpu_seconds_total",
+	)
+	sel := `{resource_id=~"i1"}`
+	qs := queriesByKind(instanceQueries(info, sel))
+	want := map[MetricKind]Query{
+		MetricCPU: {MetricCPU, "instance_server_cpu_seconds_total",
+			`sum by (resource_id) (rate(instance_server_cpu_seconds_total{resource_id=~"i1"}[5m]))`, UnitCores},
+		MetricMemory: {MetricMemory, "instance_server_memory_available_bytes",
+			`100 * (1 - avg by (resource_id) (instance_server_memory_available_bytes{resource_id=~"i1"}) / avg by (resource_id) (instance_server_memory_total_bytes{resource_id=~"i1"}))`, UnitPercent},
+	}
+	for k, w := range want {
+		if qs[k] != w {
+			t.Errorf("%s:\n got %+v\nwant %+v", k, qs[k], w)
+		}
+	}
+	if _, ok := qs[MetricDisk]; ok {
+		t.Errorf("instances have no disk usage: %+v", qs[MetricDisk])
+	}
+	io := qs[MetricDiskIO]
+	if io.Unit != UnitBytesPS || !strings.Contains(io.PromQL, "rate(instance_server_disk_read_bytes_total") ||
+		!strings.Contains(io.PromQL, "rate(instance_server_disk_write_bytes_total") || strings.Contains(io.PromQL, "ops") {
+		t.Errorf("disk io = %+v", io)
+	}
+
+	info.InstanceCPUMode = true
+	if q := queriesByKind(instanceQueries(info, sel))[MetricCPU]; !strings.Contains(q.PromQL, `mode!="idle"`) {
+		t.Errorf("cpu with mode label = %s", q.PromQL)
+	}
+}
+
+func TestInstanceQueriesGauges(t *testing.T) {
+	info := infoWith("",
+		"instance_cpu_usage_percent",
+		"instance_memory_used_bytes",
+	)
+	qs := queriesByKind(instanceQueries(info, `{resource_id=~"i1"}`))
+	if q := qs[MetricCPU]; q.Unit != UnitPercent || q.Source != "instance_cpu_usage_percent" {
+		t.Errorf("cpu = %+v", q)
+	}
+	// Bytes without a total: the UI converts with the type's RAM.
+	if q := qs[MetricMemory]; q.Unit != UnitBytes || q.Source != "instance_memory_used_bytes" {
+		t.Errorf("memory = %+v", q)
+	}
+	if len(instanceQueries(infoWith(""), "{}")) != 0 {
+		t.Error("queries without any Instance metrics")
+	}
+}
+
+// Names reported by the Scaleway monitoring agent (November 2026).
+func TestInstanceQueriesScalewayAgent(t *testing.T) {
+	info := infoWith("",
+		"instance_server_agent_up", "instance_server_cpu_seconds_total",
+		"instance_server_io_read_bytes_total", "instance_server_io_write_bytes_total",
+		"instance_server_memory_available", "instance_server_memory_free",
+		"instance_server_memory_total", "instance_server_memory_used",
+		"instance_server_net_rx_bytes_total", "instance_server_net_tx_bytes_total",
+		"instance_server_net_rx_external_bytes_total", "instance_server_net_rx_packets_total",
+		"instance_server_swap_free", "instance_server_swap_total", "instance_server_swap_used",
+		"instance_server_vcpu_count",
+	)
+	sel := `{resource_id=~"i1"}`
+	qs := queriesByKind(instanceQueries(info, sel))
+	want := map[MetricKind]Query{
+		MetricCPU: {MetricCPU, "instance_server_cpu_seconds_total",
+			`100 * sum by (resource_id) (rate(instance_server_cpu_seconds_total{resource_id=~"i1"}[5m])) / max by (resource_id) (instance_server_vcpu_count{resource_id=~"i1"})`, UnitPercent},
+		MetricMemory: {MetricMemory, "instance_server_memory_available",
+			`100 * (1 - avg by (resource_id) (instance_server_memory_available{resource_id=~"i1"}) / avg by (resource_id) (instance_server_memory_total{resource_id=~"i1"}))`, UnitPercent},
+		MetricDiskIO: {MetricDiskIO, "instance_server_io_read_bytes_total",
+			`(sum by (resource_id) (rate(instance_server_io_read_bytes_total{resource_id=~"i1"}[5m])) or 0 * sum by (resource_id) (rate(instance_server_io_write_bytes_total{resource_id=~"i1"}[5m]))) + (sum by (resource_id) (rate(instance_server_io_write_bytes_total{resource_id=~"i1"}[5m])) or 0 * sum by (resource_id) (rate(instance_server_io_read_bytes_total{resource_id=~"i1"}[5m])))`, UnitBytesPS},
+	}
+	want[MetricNetwork] = Query{MetricNetwork, "instance_server_net_rx_bytes_total",
+		`(sum by (resource_id) (rate(instance_server_net_rx_bytes_total{resource_id=~"i1"}[5m])) or 0 * sum by (resource_id) (rate(instance_server_net_tx_bytes_total{resource_id=~"i1"}[5m]))) + (sum by (resource_id) (rate(instance_server_net_tx_bytes_total{resource_id=~"i1"}[5m])) or 0 * sum by (resource_id) (rate(instance_server_net_rx_bytes_total{resource_id=~"i1"}[5m])))`, UnitBytesPS}
+	if len(qs) != len(want) {
+		t.Errorf("got %d queries, want %d: %+v", len(qs), len(want), qs)
+	}
+	for k, w := range want {
+		if qs[k] != w {
+			t.Errorf("%s:\n got %+v\nwant %+v", k, qs[k], w)
+		}
 	}
 }

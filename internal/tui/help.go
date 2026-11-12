@@ -15,7 +15,7 @@ import (
 var keyHelp = []struct{ keys, desc string }{
 	{"", "Navigation"},
 	{"← → · tab shift+tab · h", "switch tab"},
-	{"0 – 6", "go to tab by number"},
+	{"0 – 7", "go to tab by number"},
 	{"p / P", "next / previous project (all projects first)"},
 	{"↑ ↓ · j k", "move in the table (crosses into the next table on the Overview and Storage) or scroll"},
 	{"pgup pgdown · home end", "page or jump in the table"},

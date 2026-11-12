@@ -20,11 +20,12 @@ type Fetcher interface {
 	Projects(ctx context.Context) ([]core.Project, error)
 	Containers(ctx context.Context) ([]core.Container, error)
 	Databases(ctx context.Context) ([]core.Database, error)
+	Instances(ctx context.Context) ([]core.Instance, error)
 	Storage(ctx context.Context) ([]core.StorageItem, error)
 	Buckets(ctx context.Context, projectIDs []string) ([]core.StorageItem, error)
 	Users(ctx context.Context) ([]core.User, error)
 	Billing(ctx context.Context, period string, now time.Time) (core.Billing, error)
-	Metrics(ctx context.Context, containers []core.Container, dbs []core.Database, now time.Time) (core.Metrics, error)
+	Metrics(ctx context.Context, containers []core.Container, dbs []core.Database, instances []core.Instance, now time.Time) (core.Metrics, error)
 	GrafanaURLs(ctx context.Context, projectIDs []string) (map[string]string, error)
 	// CreateCockpitTokens creates read-only metrics tokens; it changes the account.
 	CreateCockpitTokens(ctx context.Context, scopes []core.ProjectRegion) error
@@ -37,6 +38,7 @@ type tab int
 const (
 	tabOverview tab = iota
 	tabProjects
+	tabInstances
 	tabContainers
 	tabDatabases
 	tabStorage
@@ -45,7 +47,7 @@ const (
 	tabCount
 )
 
-var tabNames = [tabCount]string{"Overview", "Projects", "Containers", "Databases", "Storage", "Users", "Billing"}
+var tabNames = [tabCount]string{"Overview", "Projects", "Instances", "Containers", "Databases", "Storage", "Users", "Billing"}
 
 // resource is the load state of one data set.
 type resource[T any] struct {
@@ -71,6 +73,7 @@ type Model struct {
 	projects   resource[[]core.Project]
 	containers resource[[]core.Container]
 	databases  resource[[]core.Database]
+	instances  resource[[]core.Instance]
 	storage    resource[[]core.StorageItem] // all but buckets
 	buckets    resource[bucketList]
 	users      resource[[]core.User]
@@ -113,6 +116,7 @@ func (m *Model) refresh() tea.Cmd {
 	m.projects.loading = true
 	m.containers.loading = true
 	m.databases.loading = true
+	m.instances.loading = true
 	m.storage.loading = true
 	m.users.loading = true
 	m.billing.loading = true
@@ -125,6 +129,7 @@ func (m *Model) refresh() tea.Cmd {
 		fetch(m.svc.Projects),
 		fetch(m.svc.Containers),
 		fetch(m.svc.Databases),
+		fetch(m.svc.Instances),
 		fetch(m.svc.Storage),
 		fetch(m.svc.Users),
 		fetch(func(ctx context.Context) (core.Billing, error) { return m.svc.Billing(ctx, period, now) }),
@@ -185,9 +190,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		set(&m.databases, msg)
 		m.markUpdated(tabOverview, tabProjects, tabDatabases)
 		follow = m.fetchMetricsWhenReady()
+	case fetched[[]core.Instance]:
+		set(&m.instances, msg)
+		m.markUpdated(tabOverview, tabProjects, tabInstances)
+		follow = m.fetchMetricsWhenReady()
 	case fetched[core.Metrics]:
 		set(&m.metrics, msg)
-		m.markUpdated(tabOverview, tabContainers, tabDatabases)
+		m.markUpdated(tabOverview, tabInstances, tabContainers, tabDatabases)
 	case fetched[tokensCreated]:
 		set(&m.tokens, msg)
 		if msg.err == nil {
@@ -230,7 +239,7 @@ func (m *Model) handleKey(k string) (tea.Cmd, bool) {
 		m.setTab((m.tab + 1) % tabCount)
 	case "shift+tab", "left", "h":
 		m.setTab((m.tab + tabCount - 1) % tabCount)
-	case "0", "1", "2", "3", "4", "5", "6":
+	case "0", "1", "2", "3", "4", "5", "6", "7":
 		m.setTab(tab(k[0] - '0'))
 	case "p":
 		m.scope = (m.scope + 1) % (len(m.projects.data) + 1)
@@ -303,11 +312,13 @@ func (m Model) projectName(id string) string {
 func (m Model) currentState() (loading bool, err error) {
 	switch m.tab {
 	case tabOverview:
-		return m.containers.loading || m.databases.loading || m.metrics.loading || m.tokens.loading,
-			firstErr(m.containers.err, m.databases.err, m.tokens.err, m.metrics.err)
+		return m.containers.loading || m.databases.loading || m.instances.loading || m.metrics.loading || m.tokens.loading,
+			firstErr(m.containers.err, m.databases.err, m.instances.err, m.tokens.err, m.metrics.err)
 	case tabProjects:
-		return m.containers.loading || m.databases.loading || m.billing.loading,
-			firstErr(m.projects.err, m.containers.err, m.databases.err, m.billing.err)
+		return m.containers.loading || m.databases.loading || m.instances.loading || m.billing.loading,
+			firstErr(m.projects.err, m.containers.err, m.databases.err, m.instances.err, m.billing.err)
+	case tabInstances:
+		return m.instances.loading || m.metrics.loading, firstErr(m.instances.err, m.metrics.err)
 	case tabContainers:
 		return m.containers.loading, m.containers.err
 	case tabDatabases:
@@ -398,6 +409,8 @@ func (m Model) header() string {
 		b.WriteString("\n" + m.dashboardHeader())
 	case tabProjects:
 		b.WriteString("\n" + m.spendLine())
+	case tabInstances:
+		b.WriteString("\n" + m.instancesLine())
 	case tabStorage:
 		b.WriteString("\n" + m.storageLine())
 	case tabBilling:

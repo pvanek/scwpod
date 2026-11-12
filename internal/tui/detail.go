@@ -22,7 +22,7 @@ var (
 
 // detailView is the full-screen detail of one table row.
 type detailView struct {
-	item any // core.Project, core.Container, core.Database, core.StorageItem, core.User or core.SpendLine
+	item any // core.Project, core.Container, core.Database, core.Instance, core.StorageItem, core.User or core.SpendLine
 	vp   viewport.Model
 }
 
@@ -78,7 +78,7 @@ func (m *Model) handleDetailKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "q", "ctrl+c", "r", "a":
 		cmd, _ := m.handleKey(k)
 		return cmd
-	case "tab", "shift+tab", "0", "1", "2", "3", "4", "5", "6", "p", "P":
+	case "tab", "shift+tab", "0", "1", "2", "3", "4", "5", "6", "7", "p", "P":
 		m.detail = nil
 		cmd, _ := m.handleKey(k)
 		m.rebuildTable()
@@ -119,6 +119,8 @@ func itemKey(it any) string {
 		return id("container/", v.ID)
 	case core.Database:
 		return id("database/", v.ID)
+	case core.Instance:
+		return id("instance/", v.ID)
 	case core.StorageItem:
 		return id("storage/"+v.Kind+"/", v.ID)
 	case core.User:
@@ -137,6 +139,8 @@ func detailTitle(it any) (string, string) {
 		return "Container " + v.Name, v.ID
 	case core.Database:
 		return "Database " + v.Name, v.ID
+	case core.Instance:
+		return "Instance " + v.Name, v.ID
 	case core.StorageItem:
 		return storageTitles[v.Kind] + ": " + v.Name, v.ID
 	case core.User:
@@ -197,6 +201,8 @@ func (m Model) detailBody(it any) string {
 		m.containerDetail(s, v)
 	case core.Database:
 		m.databaseDetail(s, v)
+	case core.Instance:
+		m.instanceDetail(s, v)
 	case core.StorageItem:
 		m.storageDetail(s, v)
 	case core.User:
@@ -214,7 +220,12 @@ func (m Model) projectDetail(s *sheet, p core.Project) {
 	s.field("Description", p.Description)
 	s.field("Created", timeStr(p.CreatedAt))
 
-	var conts, dbs []string
+	var vms, conts, dbs []string
+	for _, in := range m.instances.data {
+		if in.ProjectID == p.ID {
+			vms = append(vms, fmt.Sprintf("%s  %s  %s  %s", in.Name, in.Type, in.Status, in.Zone))
+		}
+	}
 	for _, c := range m.containers.data {
 		if c.ProjectID == p.ID {
 			conts = append(conts, fmt.Sprintf("%s  %s  %s", c.Name, m.containerState(c), c.Region))
@@ -234,6 +245,7 @@ func (m Model) projectDetail(s *sheet, p core.Project) {
 		storage = append(storage, line)
 	}
 	s.section("Resources")
+	s.list("Instances", vms)
 	s.list("Containers", conts)
 	s.list("Databases", dbs)
 	s.list("Storage", storage)

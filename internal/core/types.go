@@ -68,6 +68,35 @@ type Database struct {
 	CreatedAt      time.Time
 }
 
+// Instance is a virtual machine (Scaleway Instance).
+type Instance struct {
+	ID          string
+	Name        string
+	ProjectID   string
+	Zone        string
+	Status      string // running, stopped, starting, ...
+	StateDetail string
+	Type        string // commercial type, e.g. DEV1-S
+	VCPUs       uint32 // of the type; 0 when unknown
+	RAMBytes    uint64 // of the type; 0 when unknown
+	Arch        string
+	Image       string
+	PublicIPs   []string
+	PrivateIP   string
+	Hostname    string
+
+	Volumes        []string // "name size type", boot volume first
+	SecurityGroup  string
+	PlacementGroup string
+	PrivateNICs    int
+	Protected      bool
+	EndOfService   bool
+	Maintenances   []string
+	Tags           []string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
 type User struct {
 	ID          string
 	Email       string

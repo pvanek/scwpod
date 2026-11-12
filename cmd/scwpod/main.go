@@ -11,6 +11,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/scaleway/scaleway-sdk-go/scw"
 
 	"github.com/pvanek/scwpod/internal/config"
 	"github.com/pvanek/scwpod/internal/core"
@@ -25,7 +26,7 @@ const usage = `Usage: scwpod [flags] [command]
 
 Commands:
   (none)    start the dashboard
-  metrics   list the container and database metrics Cockpit provides
+  metrics   list the container, database and Instance metrics Cockpit provides
   query Q   run the PromQL query Q in every project and region (read-only)
 
 Flags:
@@ -94,8 +95,8 @@ type backend struct {
 	tokens core.CockpitTokens
 }
 
-func (b backend) Metrics(ctx context.Context, cs []core.Container, dbs []core.Database, now time.Time) (core.Metrics, error) {
-	return b.Service.Metrics(ctx, cs, dbs, b.tokens, now)
+func (b backend) Metrics(ctx context.Context, cs []core.Container, dbs []core.Database, ins []core.Instance, now time.Time) (core.Metrics, error) {
+	return b.Service.Metrics(ctx, cs, dbs, ins, b.tokens, now)
 }
 
 func (b backend) CreateCockpitTokens(ctx context.Context, scopes []core.ProjectRegion) error {
@@ -166,10 +167,19 @@ func resourceScopes(ctx context.Context, b backend) ([]core.ProjectRegion, error
 	for _, d := range dbs {
 		add(core.ProjectRegion{ProjectID: d.ProjectID, Region: d.Region})
 	}
+	instances, err := b.Instances(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, in := range instances {
+		if region, err := scw.Zone(in.Zone).Region(); err == nil {
+			add(core.ProjectRegion{ProjectID: in.ProjectID, Region: string(region)})
+		}
+	}
 	return scopes, nil
 }
 
-// printMetrics shows, per project and region with containers or databases,
+// printMetrics shows, per project and region with containers, databases or Instances,
 // which Scaleway metrics Cockpit has, which container metrics the dashboard
 // picks, and the labels of a sample series.
 func printMetrics(b backend) error {
@@ -180,7 +190,7 @@ func printMetrics(b backend) error {
 		return err
 	}
 	if len(scopes) == 0 {
-		fmt.Println("no containers or databases found")
+		fmt.Println("no containers, databases or Instances found")
 		return nil
 	}
 
@@ -212,7 +222,7 @@ func printMetrics(b backend) error {
 				fmt.Printf("    %s=%q\n", k, labels[k])
 			}
 		}
-		for _, kind := range []string{"containers", "postgresql", "mysql"} {
+		for _, kind := range []string{"containers", "instances", "postgresql", "mysql"} {
 			fmt.Printf("  queries for %s:\n", kind)
 			for _, q := range planned[kind] {
 				fmt.Printf("    %-16s %s\n", q.Kind, q.PromQL)

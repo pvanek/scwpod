@@ -33,7 +33,10 @@ type Query struct {
 type SourceInfo struct {
 	names       map[string]bool
 	StatusLabel string // label with the HTTP status on container requests
-	fetched     time.Time
+	// InstanceCPUMode is set when the Instance CPU counter has a "mode"
+	// label (node exporter style), so idle time must be excluded.
+	InstanceCPUMode bool
+	fetched         time.Time
 }
 
 // Names returns the discovered metric names, sorted.
@@ -292,13 +295,166 @@ func pickWAL(prefix string, info *SourceInfo) string {
 }
 
 // PlannedQueries returns the queries scwpod would run in a data source for
-// containers and for each database engine, with placeholder IDs. Used by
+// containers, Instances and each database engine, with placeholder IDs. Used by
 // `scwpod metrics`.
 func PlannedQueries(info *SourceInfo) map[string][]Query {
 	sel := idSelector([]string{"<id>"})
 	return map[string][]Query{
 		"containers": containerQueries(info, sel),
+		"instances":  instanceQueries(info, sel),
 		"postgresql": databaseQueries(DatabaseMetricPrefix("postgresql"), sel, info),
 		"mysql":      databaseQueries(DatabaseMetricPrefix("mysql"), sel, info),
 	}
+}
+
+// --- instances ---
+
+// InstanceMetricPrefix is the name prefix of Scaleway Instance metrics.
+const InstanceMetricPrefix = "instance_"
+
+// find returns the shortest discovered name with prefix that contains all
+// of want and none of skip (case-insensitive), or "".
+func (i *SourceInfo) find(prefix string, want, skip []string) string {
+	best := ""
+outer:
+	for _, n := range i.Names() {
+		l := strings.ToLower(n)
+		if !strings.HasPrefix(l, prefix) {
+			continue
+		}
+		for _, w := range want {
+			if !strings.Contains(l, w) {
+				continue outer
+			}
+		}
+		for _, s := range skip {
+			if strings.Contains(l, s) {
+				continue outer
+			}
+		}
+		if best == "" || len(n) < len(best) || (len(n) == len(best) && n < best) {
+			best = n
+		}
+	}
+	return best
+}
+
+// firstFound returns the first non-empty result of find over the
+// candidate want lists.
+func (i *SourceInfo) firstFound(prefix string, skip []string, wants ...[]string) string {
+	for _, w := range wants {
+		if n := i.find(prefix, w, skip); n != "" {
+			return n
+		}
+	}
+	return ""
+}
+
+// instanceCPU is the Instance CPU metric name, or "".
+func (i *SourceInfo) instanceCPU() string {
+	return i.find(InstanceMetricPrefix, []string{"cpu"}, []string{"limit", "steal", "throttl", "count", "info"})
+}
+
+// isCounter reports whether a metric name looks like a Prometheus counter.
+func isCounter(name string) bool { return strings.HasSuffix(name, "_total") }
+
+// perSecond sums a counter's rate by resource, or a gauge that already is
+// a rate.
+func perSecond(name, sel string) string {
+	if isCounter(name) {
+		return byID("sum", rate(name, sel))
+	}
+	return byID("sum", name+sel)
+}
+
+// instanceQueries builds the Instance query set from the names the data
+// source provides. Scaleway does not document them, so they are matched
+// loosely: "cpu", "mem" with available/used/total, disk or volume
+// read/write bytes and network rx/tx bytes. CPU in cores and memory in bytes are
+// turned into percentages by the UI using the Instance type's size.
+//
+// Observed with the Scaleway monitoring agent (instance_server_agent_up):
+// instance_server_cpu_seconds_total, _vcpu_count, _memory_{available,
+// free,used,total}, _io_{read,write}_bytes_total, _net_{rx,tx}_*, _swap_*.
+// The agent reports no file system usage, so there is no disk usage.
+func instanceQueries(info *SourceInfo, sel string) []Query {
+	p := InstanceMetricPrefix
+	var qs []Query
+
+	if cpu := info.instanceCPU(); cpu != "" {
+		switch {
+		case isCounter(cpu):
+			s := sel
+			if info.InstanceCPUMode {
+				s = withMatcher(sel, `mode!="idle"`)
+			}
+			busy := byID("sum", rate(cpu, s))
+			if n := info.has(p + "server_vcpu_count"); n != "" {
+				// The agent reports the vCPU count; without it the UI
+				// uses the size of the Instance type.
+				qs = append(qs, Query{MetricCPU, cpu, fmt.Sprintf("100 * %s / %s", busy, byID("max", n+sel)), UnitPercent})
+			} else {
+				qs = append(qs, Query{MetricCPU, cpu, busy, UnitCores})
+			}
+		case strings.Contains(cpu, "percent"), strings.Contains(cpu, "ratio"):
+			qs = append(qs, Query{MetricCPU, cpu, byID("avg", cpu+sel), UnitPercent})
+		default:
+			qs = append(qs, Query{MetricCPU, cpu, byID("avg", cpu+sel), UnitCores})
+		}
+	}
+
+	memSkip := []string{"swap", "limit", "info"}
+	total := info.firstFound(p, memSkip, []string{"mem", "total"}, []string{"mem", "size"})
+	avail := info.firstFound(p, memSkip, []string{"mem", "avail"}, []string{"mem", "free"})
+	used := info.firstFound(p, append(memSkip, "total", "avail", "free", "size"), []string{"mem", "used"}, []string{"mem", "usage"})
+	switch {
+	case used != "" && (strings.Contains(used, "percent") || strings.Contains(used, "ratio")):
+		qs = append(qs, Query{MetricMemory, used, byID("avg", used+sel), UnitPercent})
+	case avail != "" && total != "":
+		qs = append(qs, Query{MetricMemory, avail,
+			fmt.Sprintf("100 * (1 - %s / %s)", byID("avg", avail+sel), byID("avg", total+sel)), UnitPercent})
+	case used != "" && total != "":
+		qs = append(qs, Query{MetricMemory, used,
+			fmt.Sprintf("100 * %s / %s", byID("avg", used+sel), byID("avg", total+sel)), UnitPercent})
+	case used != "":
+		qs = append(qs, Query{MetricMemory, used, byID("avg", used+sel), unitFromName(used)})
+	}
+
+	// Volume throughput.
+	ioSkip := []string{"network", "receive", "transmit", "ops", "request", "time", "seconds"}
+	var read, write string
+	for _, dev := range []string{"disk", "volume", "block", "_io_"} {
+		if read == "" {
+			read = info.find(p, []string{dev, "read", "bytes"}, ioSkip)
+		}
+		if write == "" {
+			write = info.find(p, []string{dev, "writ", "bytes"}, ioSkip)
+		}
+	}
+	if q, ok := bothWays(MetricDiskIO, read, write, sel); ok {
+		qs = append(qs, q)
+	}
+
+	// Network traffic in + out, all of it (the agent also reports the
+	// external, internet-facing part separately).
+	netSkip := []string{"packets", "external", "drop", "err"}
+	rx := info.firstFound(p, netSkip, []string{"net", "rx", "bytes"}, []string{"receive", "bytes"})
+	tx := info.firstFound(p, netSkip, []string{"net", "tx", "bytes"}, []string{"transmit", "bytes"})
+	if q, ok := bothWays(MetricNetwork, rx, tx, sel); ok {
+		qs = append(qs, q)
+	}
+	return qs
+}
+
+// bothWays sums the per-second rates of two directions (read/write,
+// in/out), keeping a resource that reports only one of them.
+func bothWays(kind MetricKind, a, b, sel string) (Query, bool) {
+	switch {
+	case a != "" && b != "":
+		ra, rb := perSecond(a, sel), perSecond(b, sel)
+		return Query{kind, a, fmt.Sprintf("(%s or 0 * %s) + (%s or 0 * %s)", ra, rb, rb, ra), UnitBytesPS}, true
+	case a != "" || b != "":
+		return Query{kind, a + b, perSecond(a+b, sel), UnitBytesPS}, true
+	}
+	return Query{}, false
 }

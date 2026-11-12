@@ -290,6 +290,8 @@ func (m Model) tableData() []paneData {
 	switch m.tab {
 	case tabProjects:
 		return one("Projects", m.projectsTable)
+	case tabInstances:
+		return []paneData{m.instancePane(scope)}
 	case tabContainers:
 		return one("Containers", m.containerTable)
 	case tabDatabases:
@@ -307,7 +309,7 @@ func (m Model) tableData() []paneData {
 
 func (m Model) projectsTable(scope string) ([]col, []table.Row, []any) {
 	cols := []col{
-		{"Project", 12, 1, left}, {"Containers", 10, 0, right}, {"Not ready", 9, 0, right},
+		{"Project", 12, 1, left}, {"Instances", 9, 0, right}, {"Containers", 10, 0, right}, {"Not ready", 9, 0, right},
 		{"Databases", 9, 0, right}, {"Spend MTD", 12, 0, right},
 	}
 	spend := map[string]core.ProjectTotal{}
@@ -322,7 +324,12 @@ func (m Model) projectsTable(scope string) ([]col, []table.Row, []any) {
 		if scope != core.AllProjects && p.ID != scope {
 			continue
 		}
-		var nCont, notReady, nDB int
+		var nVM, nCont, notReady, nDB int
+		for _, in := range m.instances.data {
+			if in.ProjectID == p.ID {
+				nVM++
+			}
+		}
 		for _, c := range m.containers.data {
 			if c.ProjectID == p.ID {
 				nCont++
@@ -338,7 +345,7 @@ func (m Model) projectsTable(scope string) ([]col, []table.Row, []any) {
 		}
 		t := spend[p.ID]
 		rows = append(rows, table.Row{
-			p.Name, fmt.Sprint(nCont), fmt.Sprint(notReady), fmt.Sprint(nDB), money(t.Amount, t.Currency),
+			p.Name, fmt.Sprint(nVM), fmt.Sprint(nCont), fmt.Sprint(notReady), fmt.Sprint(nDB), money(t.Amount, t.Currency),
 		})
 		items = append(items, p)
 	}

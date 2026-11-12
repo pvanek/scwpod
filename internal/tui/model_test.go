@@ -34,6 +34,15 @@ func (fakeFetcher) Databases(context.Context) ([]core.Database, error) {
 	return []core.Database{{ID: "d1", Name: "pg-main", ProjectID: "p2", Engine: "PostgreSQL-16", Status: "ready"}}, nil
 }
 
+func (fakeFetcher) Instances(context.Context) ([]core.Instance, error) {
+	return []core.Instance{
+		{ID: "i1", Name: "bastion", ProjectID: "p1", Zone: "fr-par-1", Status: "running", Type: "DEV1-S", VCPUs: 2, RAMBytes: 2e9,
+			Image: "Ubuntu 24.04", PublicIPs: []string{"51.15.0.1"}, PrivateIP: "10.0.0.2",
+			Volumes: []string{"root 20GB l_ssd (boot)"}, SecurityGroup: "default"},
+		{ID: "i2", Name: "batch", ProjectID: "p2", Zone: "nl-ams-1", Status: "stopped", Type: "GP1-XS"},
+	}, nil
+}
+
 func (fakeFetcher) Storage(context.Context) ([]core.StorageItem, error) {
 	two := 2
 	return []core.StorageItem{
@@ -79,7 +88,7 @@ func series(unit core.Unit, values ...float64) core.Metric {
 	return m
 }
 
-func (fakeFetcher) Metrics(context.Context, []core.Container, []core.Database, time.Time) (core.Metrics, error) {
+func (fakeFetcher) Metrics(context.Context, []core.Container, []core.Database, []core.Instance, time.Time) (core.Metrics, error) {
 	return core.Metrics{
 		ByResource: map[string]core.ResourceMetrics{
 			"c1": {
@@ -89,6 +98,12 @@ func (fakeFetcher) Metrics(context.Context, []core.Container, []core.Database, t
 				core.MetricErrorRate: series(core.UnitPercent, 0, 2.5),
 				core.MetricLatency:   series(core.UnitSeconds, 0.12, 0.25),
 				core.MetricInstances: series(core.UnitCount, 1, 3),
+			},
+			"i1": {
+				core.MetricCPU:     series(core.UnitCores, 0.1, 0.5), // of 2 vCPU -> 25%
+				core.MetricMemory:  series(core.UnitBytes, 1e9, 1e9), // of 2 GB -> 50%
+				core.MetricDiskIO:  series(core.UnitBytesPS, 2e6, 3e6),
+				core.MetricNetwork: series(core.UnitBytesPS, 1e5, 4e5),
 			},
 			"d1": {
 				core.MetricCPU:            series(core.UnitPercent, 10, 30),
@@ -131,6 +146,8 @@ func loaded(t *testing.T) Model {
 	tm, _ = tm.Update(fetched[[]core.Container]{data: c, err: err})
 	d, err := f.Databases(ctx)
 	tm, _ = tm.Update(fetched[[]core.Database]{data: d, err: err})
+	in, err := f.Instances(ctx)
+	tm, _ = tm.Update(fetched[[]core.Instance]{data: in, err: err})
 	st, err := f.Storage(ctx)
 	tm, _ = tm.Update(fetched[[]core.StorageItem]{data: st, err: err})
 	bk, err := f.Buckets(ctx, nil)
@@ -139,11 +156,17 @@ func loaded(t *testing.T) Model {
 	tm, _ = tm.Update(fetched[[]core.User]{data: u, err: err})
 	b, err := f.Billing(ctx, "2026-10", m.now())
 	tm, _ = tm.Update(fetched[core.Billing]{data: b, err: err})
-	mt, err := f.Metrics(ctx, c, d, m.now())
+	mt, err := f.Metrics(ctx, c, d, in, m.now())
 	tm, _ = tm.Update(fetched[core.Metrics]{data: mt, err: err})
 	g, err := f.GrafanaURLs(ctx, nil)
 	tm, _ = tm.Update(fetched[map[string]string]{data: g, err: err})
 	return tm.(Model)
+}
+
+// toContainers moves the Overview cursor past the two Instances to the
+// first container.
+func toContainers(m Model) Model {
+	return sendKey(sendKey(m, tea.KeyDown), tea.KeyDown)
 }
 
 func press(m Model, key string) Model {
@@ -164,7 +187,7 @@ func TestProjectsAllProjects(t *testing.T) {
 
 func TestProjectScopeFilters(t *testing.T) {
 	m := press(loaded(t), "p") // -> "web"
-	m = press(m, "2")          // containers tab
+	m = press(m, "3")          // containers tab
 	out := m.render()
 	if !strings.Contains(out, "Project: ") || !strings.Contains(out, "api") {
 		t.Errorf("expected web's container:\n%s", out)
@@ -179,12 +202,12 @@ func TestProjectScopeFilters(t *testing.T) {
 }
 
 func TestTabErrorIsShown(t *testing.T) {
-	m := press(loaded(t), "5") // users
+	m := press(loaded(t), "6") // users
 	if out := m.render(); !strings.Contains(out, "permission denied") {
 		t.Errorf("users error not shown:\n%s", out)
 	}
 	// Other tabs are unaffected.
-	m = press(m, "3")
+	m = press(m, "4")
 	if out := m.render(); strings.Contains(out, "permission denied") || !strings.Contains(out, "pg-main") {
 		t.Errorf("databases tab wrong:\n%s", out)
 	}
@@ -196,7 +219,7 @@ func resize(m Model, w, h int) Model {
 }
 
 func TestBillingPanel(t *testing.T) {
-	m := resize(press(loaded(t), "6"), 170, 40)
+	m := resize(press(loaded(t), "7"), 170, 40)
 	out := m.render()
 	for _, want := range []string{
 		"This month 2026-10", "Consumption", "10.50 EUR", "-0.50 EUR", "Total", "12.00 EUR",
@@ -215,7 +238,7 @@ func TestBillingPanel(t *testing.T) {
 }
 
 func TestBillingPanelNarrowStacks(t *testing.T) {
-	m := resize(press(loaded(t), "6"), 60, 50)
+	m := resize(press(loaded(t), "7"), 60, 50)
 	out := m.render()
 	for i, line := range strings.Split(out, "\n") {
 		if w := lipgloss.Width(line); w > 60 {
@@ -233,7 +256,7 @@ func sendKey(m Model, code rune) Model {
 }
 
 func TestArrowKeysMoveTableCursor(t *testing.T) {
-	m := press(loaded(t), "6") // billing: 2 rows
+	m := press(loaded(t), "7") // billing: 2 rows
 	m = sendKey(m, tea.KeyDown)
 	if got := m.cur().table.Cursor(); got != 1 {
 		t.Fatalf("after down: cursor = %d, want 1", got)
@@ -253,7 +276,7 @@ func TestArrowKeysMoveTableCursor(t *testing.T) {
 }
 
 func TestEnterOpensDetailAndEscCloses(t *testing.T) {
-	m := press(loaded(t), "2") // containers: api, worker
+	m := press(loaded(t), "3") // containers: api, worker
 	m = sendKey(m, tea.KeyDown)
 	m = sendKey(m, tea.KeyEnter)
 	if m.detail == nil {
@@ -299,7 +322,7 @@ func TestProjectsEnterShowsProject(t *testing.T) {
 		}
 	}
 	// Switching tab closes the detail.
-	tm, _ := m.Update(tea.KeyPressMsg{Code: '3', Text: "3"})
+	tm, _ := m.Update(tea.KeyPressMsg{Code: '4', Text: "4"})
 	m = tm.(Model)
 	if m.detail != nil || m.tab != tabDatabases {
 		t.Errorf("tab key: detail=%v tab=%d", m.detail != nil, m.tab)
@@ -307,7 +330,7 @@ func TestProjectsEnterShowsProject(t *testing.T) {
 }
 
 func TestEnterOnEmptyTableIsNoop(t *testing.T) {
-	m := press(loaded(t), "5") // users failed to load: no rows
+	m := press(loaded(t), "6") // users failed to load: no rows
 	m = sendKey(m, tea.KeyEnter)
 	if m.detail != nil {
 		t.Error("detail opened on empty table")
@@ -342,8 +365,9 @@ func TestDashboard(t *testing.T) {
 			t.Errorf("overview shows %q:\n%s", unwanted, out)
 		}
 	}
-	// Enter opens the container detail with its charts.
-	m = sendKey(m, tea.KeyEnter)
+	// Enter opens the container detail with its charts (below the two
+	// Instances).
+	m = sendKey(toContainers(m), tea.KeyEnter)
 	if out := m.render(); !strings.Contains(out, "Container api") || !strings.Contains(out, "max 50%") {
 		t.Errorf("container detail without metrics:\n%s", out)
 	}
@@ -368,13 +392,17 @@ func TestCreateTokensOnlyOnKeyPress(t *testing.T) {
 	}
 }
 
-func TestMetricsFetchWaitsForBothLists(t *testing.T) {
+func TestMetricsFetchWaitsForAllLists(t *testing.T) {
 	m := loaded(t)
 	m.containers.loading, m.databases.loading = true, true
 	if m.fetchMetricsWhenReady() != nil {
 		t.Error("metrics fetched while lists are loading")
 	}
-	m.containers.loading, m.databases.loading = false, false
+	m.containers.loading, m.databases.loading, m.instances.loading = false, false, true
+	if m.fetchMetricsWhenReady() != nil {
+		t.Error("metrics fetched while instances are loading")
+	}
+	m.instances.loading = false
 	cmd := m.fetchMetricsWhenReady()
 	if cmd == nil {
 		t.Fatal("metrics not fetched once both lists arrived")
@@ -384,8 +412,8 @@ func TestMetricsFetchWaitsForBothLists(t *testing.T) {
 	}
 	m.lastRefresh[tabOverview] = m.now().Add(-2 * time.Minute)
 	tm, cmd := m.Update(autoTickMsg{})
-	if cmd == nil || !tm.(Model).containers.loading || !tm.(Model).databases.loading {
-		t.Error("auto tick did not refresh containers and databases")
+	if cmd == nil || !tm.(Model).containers.loading || !tm.(Model).databases.loading || !tm.(Model).instances.loading {
+		t.Error("auto tick did not refresh containers, databases and instances")
 	}
 }
 
@@ -399,10 +427,15 @@ func TestSparkline(t *testing.T) {
 }
 
 func TestOverviewCursorCrossesPanes(t *testing.T) {
-	m := loaded(t) // containers: api, worker; databases: pg-main
+	m := loaded(t) // instances: bastion, batch; containers: api, worker; databases: pg-main
+	m = sendKey(m, tea.KeyDown)
+	m = sendKey(m, tea.KeyDown) // past the last instance
+	if m.focus != 1 || m.cur().table.Cursor() != 0 {
+		t.Fatalf("focus=%d cursor=%d, want containers pane row 0", m.focus, m.cur().table.Cursor())
+	}
 	m = sendKey(m, tea.KeyDown)
 	m = sendKey(m, tea.KeyDown) // past the last container
-	if m.focus != 1 || m.cur().table.Cursor() != 0 {
+	if m.focus != 2 || m.cur().table.Cursor() != 0 {
 		t.Fatalf("focus=%d cursor=%d, want databases pane row 0", m.focus, m.cur().table.Cursor())
 	}
 	m = sendKey(m, tea.KeyEnter)
@@ -411,7 +444,7 @@ func TestOverviewCursorCrossesPanes(t *testing.T) {
 	}
 	m = sendKey(m, tea.KeyEscape)
 	m = sendKey(m, tea.KeyUp) // back into the containers pane, last row
-	if m.focus != 0 || m.cur().table.Cursor() != 1 {
+	if m.focus != 1 || m.cur().table.Cursor() != 1 {
 		t.Errorf("focus=%d cursor=%d, want containers pane row 1", m.focus, m.cur().table.Cursor())
 	}
 }
@@ -455,7 +488,7 @@ func TestContainerRunningState(t *testing.T) {
 	}
 
 	// The detail view explains it.
-	m = loaded(t)
+	m = toContainers(loaded(t))
 	m = sendKey(m, tea.KeyEnter)
 	if out := m.render(); !strings.Contains(out, "3 instance(s)") || !strings.Contains(out, "scale 0–0") {
 		t.Errorf("detail missing running info:\n%s", out)
@@ -548,7 +581,7 @@ func TestAutoRefreshPerTab(t *testing.T) {
 	}
 
 	// Users: off, so a due tick does nothing.
-	m = press(m, "5")
+	m = press(m, "6")
 	m.lastRefresh[tabUsers] = m.now().Add(-time.Hour)
 	m.onAutoTick()
 	if m.users.loading {
@@ -589,7 +622,7 @@ func TestAutoRefreshPerTab(t *testing.T) {
 }
 
 func TestAutoRefreshOnlyVisibleTab(t *testing.T) {
-	m := press(loaded(t), "6") // billing, auto off; overview still on
+	m := press(loaded(t), "7") // billing, auto off; overview still on
 	m.lastRefresh[tabOverview] = m.now().Add(-time.Hour)
 	m.onAutoTick()
 	if m.containers.loading || m.databases.loading {
@@ -598,7 +631,7 @@ func TestAutoRefreshOnlyVisibleTab(t *testing.T) {
 }
 
 func TestAutoToggleInDetail(t *testing.T) {
-	m := press(loaded(t), "2")
+	m := press(loaded(t), "3")
 	m = sendKey(m, tea.KeyEnter)
 	tm, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	m = tm.(Model)
@@ -638,7 +671,7 @@ func TestDetailLinks(t *testing.T) {
 	defer func(orig func(string) error) { opener = orig }(opener)
 	opener = func(url string) error { opened = append(opened, url); return nil }
 
-	m := resize(loaded(t), 120, 60)
+	m := toContainers(resize(loaded(t), 120, 60))
 	m = sendKey(m, tea.KeyEnter) // container api
 	out := m.render()
 	if !strings.Contains(out, "Cockpit (Grafana)") {
@@ -669,7 +702,7 @@ func TestDetailLinks(t *testing.T) {
 }
 
 func TestDatabaseDetailLinks(t *testing.T) {
-	m := resize(loaded(t), 120, 60)
+	m := toContainers(resize(loaded(t), 120, 60))
 	m = sendKey(m, tea.KeyDown)
 	m = sendKey(m, tea.KeyDown) // databases pane
 	m = sendKey(m, tea.KeyEnter)
@@ -714,6 +747,7 @@ func TestOverviewTableLinks(t *testing.T) {
 	}
 
 	// m/L open the selected row's links without a detail.
+	m = toContainers(m)
 	m = sendKey(m, tea.KeyDown) // worker (p2): links still exist, unfiltered
 	m = sendKey(m, tea.KeyDown) // pg-main
 	tm, _ := m.Update(tea.KeyPressMsg{Code: 'm', Text: "m"})
@@ -729,7 +763,7 @@ func TestOverviewTableLinks(t *testing.T) {
 	}
 
 	// m on a tab without links is not handled.
-	m = press(m, "4")
+	m = press(m, "5")
 	if _, handled := m.handleKey("m"); handled {
 		t.Error("m handled on the Users tab")
 	}
@@ -745,10 +779,10 @@ func TestLinkCellKeepsHighlight(t *testing.T) {
 }
 
 func TestStorageTab(t *testing.T) {
-	m := resize(press(loaded(t), "4"), 120, 40)
+	m := resize(press(loaded(t), "5"), 120, 40)
 	out := ansi.Strip(m.render())
 	for _, want := range []string{
-		"4 Storage", "Object 1 · Registry 1 (1.5G) · Block 1 (50.0G) · Local 1 (20.0G) · File 0",
+		"5 Storage", "Object 1 · Registry 1 (1.5G) · Block 1 (50.0G) · Local 1 (20.0G) · File 0",
 		"Object Storage buckets (1)", "assets", "https://assets.s3.nl-ams",
 		"Container Registry namespaces (1)", "images", "private",
 		"Block Storage volumes (1)", "pgdata", "sbs_5k", "db-vm",
@@ -806,7 +840,7 @@ func TestUpdatedTimePerTab(t *testing.T) {
 	if out := ansi.Strip(m.render()); !strings.Contains(out, "updated 12:01:30") {
 		t.Errorf("overview updated time not moved:\n%s", out)
 	}
-	if out := ansi.Strip(press(m, "5").render()); !strings.Contains(out, "updated 12:00:00") {
+	if out := ansi.Strip(press(m, "6").render()); !strings.Contains(out, "updated 12:00:00") {
 		t.Errorf("users updated time changed by a container refresh:\n%s", out)
 	}
 }
@@ -838,7 +872,7 @@ func TestLowercaseLOpensLogs(t *testing.T) {
 	defer func(orig func(string) error) { opener = orig }(opener)
 	opener = func(url string) error { opened = append(opened, url); return nil }
 
-	m := loaded(t)
+	m := toContainers(loaded(t))
 	tm, _ := m.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
 	if m = tm.(Model); m.tab != tabOverview || len(opened) != 1 || !strings.Contains(opened[0], "logs") {
 		t.Errorf("l: tab=%d opened=%v", m.tab, opened)
@@ -868,5 +902,58 @@ func TestHelpWindow(t *testing.T) {
 	tm, _ = tm.(Model).Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if m = tm.(Model); m.help != nil || m.detail == nil {
 		t.Errorf("help from detail: help=%v detail=%v", m.help != nil, m.detail != nil)
+	}
+}
+
+func TestInstancesTab(t *testing.T) {
+	m := press(loaded(t), "2")
+	if m.tab != tabInstances {
+		t.Fatalf("tab = %v, want instances", m.tab)
+	}
+	out := ansi.Strip(m.render())
+	for _, want := range []string{"2 Instances", "Instances 2 · running 1 · stopped 1", "bastion", "DEV1-S", "51.15.0.1", "batch",
+		"25%", "50%", "3.0M/s", "Net", "400.0k/s"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("instances tab missing %q:\n%s", want, out)
+		}
+	}
+	m = press(m, "p") // web: only bastion
+	if out := ansi.Strip(m.render()); strings.Contains(out, "batch") || !strings.Contains(out, "bastion") {
+		t.Errorf("project scope not applied:\n%s", out)
+	}
+	m = press(m, "enter")
+	if m.detail == nil {
+		t.Fatal("no detail opened")
+	}
+	body := ansi.Strip(m.detailBody(m.detail.item))
+	for _, want := range []string{"bastion", "fr-par-1", "10.0.0.2", "root 20GB l_ssd (boot)", "default",
+		"2 vCPU, 2.0G RAM", "Metrics, last 1h", "Disk I/O", "Network"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("detail missing %q:\n%s", want, body)
+		}
+	}
+}
+
+func TestProjectsCountInstances(t *testing.T) {
+	m := press(loaded(t), "1")
+	p := m.cur()
+	if p == nil || len(p.items) != 2 {
+		t.Fatalf("projects pane: %+v", p)
+	}
+	if got := p.table.Rows()[0][1]; strings.TrimSpace(got) != "1" {
+		t.Errorf("web instances = %q, want 1", got)
+	}
+}
+
+func TestOverviewShowsInstances(t *testing.T) {
+	m := resize(loaded(t), 140, 50)
+	out := ansi.Strip(m.render())
+	for _, want := range []string{"Instances", "1 running · 1 stopped", "Instances (2)", "bastion", "25%", "batch"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("overview missing %q:\n%s", want, out)
+		}
+	}
+	if len(m.panes) != 3 || m.panes[0].title != "Instances" {
+		t.Errorf("panes = %d, first %q", len(m.panes), m.panes[0].title)
 	}
 }

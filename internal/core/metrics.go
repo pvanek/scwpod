@@ -32,6 +32,10 @@ const (
 	MetricWAL            MetricKind = "wal"             // WAL size or write rate
 	MetricTransactions   MetricKind = "transactions"    // commits (PostgreSQL) or queries (MySQL) per second
 	MetricCacheHit       MetricKind = "cache_hit"       // percent of reads served from cache
+
+	// Instances (virtual machines).
+	MetricDiskIO  MetricKind = "disk_io" // volume read + write throughput
+	MetricNetwork MetricKind = "network" // received + sent throughput
 )
 
 // Unit tells the UI how to format a metric value.

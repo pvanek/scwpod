@@ -1,7 +1,7 @@
 # scwpod
 
 A terminal dashboard for your [Scaleway](https://www.scaleway.com) organization:
-serverless containers, managed databases, storage, IAM users and spending, across all
+virtual machines (Instances), serverless containers, managed databases, storage, IAM users and spending, across all
 projects and regions. Runs on Linux and in Termux on Android.
 
 > Unofficial project, not affiliated with or endorsed by Scaleway.
@@ -14,8 +14,9 @@ Early scaffold. Working today:
 
 | Tab | Data |
 |---|---|
-| Overview | Live dashboard (auto-refresh on by default): container and database health, then one table per resource type with current values (last-hour charts in the detail view). Containers: CPU, memory, instances, requests/s, 5xx error rate, p95 latency. Databases: CPU, memory, disk, connections (and % of max), replication lag, WAL, transactions/queries per second, cache hit ratio |
-| Projects | Per project: containers, containers not ready, databases, month-to-date spend |
+| Overview | Live dashboard (auto-refresh on by default): Instance, container and database health, then one table per resource type with current values (last-hour charts in the detail view). Instances: CPU, memory, disk I/O, network. Containers: CPU, memory, instances, requests/s, 5xx error rate, p95 latency. Databases: CPU, memory, disk, connections (and % of max), replication lag, WAL, transactions/queries per second, cache hit ratio |
+| Projects | Per project: instances, containers, containers not ready, databases, month-to-date spend |
+| Instances | Virtual machines (Instances) in all zones: type, status, image, public and private IP, CPU, memory, disk I/O and network; volumes and charts in the detail view. The header counts running and stopped ones |
 | Containers | Serverless Containers in all regions: status, scaling, resources, endpoint |
 | Databases | Managed Databases (RDB): engine, node type, status, HA, disk, endpoint |
 | Storage | One table per kind that exists: Object Storage buckets (region, endpoint), Container Registry namespaces (access, images, size), Block Storage and Instance local volumes (type, size, attached Instance), File Storage (size, mounts). The header sums count and size per kind |
@@ -77,6 +78,16 @@ provides the underlying metrics. Container metrics are picked from the
 `serverless_container_*` names Cockpit reports; the error rate needs a status
 code label on the request counter and the latency a duration histogram.
 
+Instance metrics come from the Scaleway monitoring agent installed in the
+VM (`instance_server_*` in Cockpit); Instances without it show none. CPU is
+`instance_server_cpu_seconds_total` against `instance_server_vcpu_count`,
+memory `instance_server_memory_available` against `_memory_total`, and disk
+I/O the read and write rates of `instance_server_io_{read,write}_bytes_total`
+and network the received and sent rates of `instance_server_net_{rx,tx}_bytes_total`.
+The agent reports no file system usage, so there is no disk usage. The names
+are matched loosely, so `scwpod metrics` shows the Instance queries built
+for your account.
+
 Containers and databases link to their Cockpit Grafana dashboards: in the
 Overview tables the name and the Metrics column open the metrics dashboard and
 the Logs column the logs (the columns show from 100 columns wide). Details
@@ -114,13 +125,13 @@ scwpod query 'avg by (resource_name) (serverless_container_cpu_usage_ratio)'
 | Key | Action |
 |---|---|
 | `F1` / `?` | show all keys |
-| `←` `→` / `tab` / `0`–`6` | switch tab |
+| `←` `→` / `tab` / `0`–`7` | switch tab |
 | `p` / `P` | next / previous project |
 | `↑` `↓` | move in table (crosses into the next table on the Overview) / scroll detail |
 | `enter` | open detail of the selected row |
 | `esc` / `←` | back from detail |
 | `r` | refresh everything |
-| `a` | toggle auto-refresh of the current tab (Overview, Projects, Containers, Databases: every 1 min; Storage, Users, Billing: every 5 min). On by default only for Overview |
+| `a` | toggle auto-refresh of the current tab (Overview, Projects, Instances, Containers, Databases: every 1 min; Storage, Users, Billing: every 5 min). On by default only for Overview |
 | `T` | create missing Cockpit tokens (Overview) |
 | `m` / `l` | open the selected container's or database's Cockpit Grafana metrics dashboard / logs in the browser (Overview, Containers, Databases, details) |
 | `q` | quit |

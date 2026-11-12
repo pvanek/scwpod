@@ -16,23 +16,23 @@ import (
 
 // --- fetching ---
 
-// fetchMetricsWhenReady fetches metrics once both the container and the
-// database lists have arrived, so one refresh queries Cockpit once.
+// fetchMetricsWhenReady fetches metrics once the container, database and
+// Instance lists have arrived, so one refresh queries Cockpit once.
 func (m *Model) fetchMetricsWhenReady() tea.Cmd {
-	if m.containers.loading || m.databases.loading {
+	if m.containers.loading || m.databases.loading || m.instances.loading {
 		return nil
 	}
 	return m.fetchMetrics()
 }
 
 func (m *Model) fetchMetrics() tea.Cmd {
-	containers, dbs, now := m.containers.data, m.databases.data, m.now()
-	if len(containers) == 0 && len(dbs) == 0 {
+	containers, dbs, instances, now := m.containers.data, m.databases.data, m.instances.data, m.now()
+	if len(containers) == 0 && len(dbs) == 0 && len(instances) == 0 {
 		return nil
 	}
 	m.metrics.loading = true
 	return fetch(func(ctx context.Context) (core.Metrics, error) {
-		return m.svc.Metrics(ctx, containers, dbs, now)
+		return m.svc.Metrics(ctx, containers, dbs, instances, now)
 	})
 }
 
@@ -78,6 +78,12 @@ func (m Model) dashboardHeader() string {
 			}
 		}
 	}
+	vmRunning, vmStopped, vmOther := countInstances(core.ByProject(m.instances.data, scope, func(i core.Instance) string { return i.ProjectID }))
+	vmValue := fmt.Sprintf("%d running · %d stopped", vmRunning, vmStopped)
+	if vmOther > 0 {
+		vmValue += warn.Render(fmt.Sprintf(" %d other", vmOther))
+	}
+
 	readyD := 0
 	for _, d := range dbs {
 		if d.Status == "ready" {
@@ -93,6 +99,7 @@ func (m Model) dashboardHeader() string {
 		contValue += warn.Render(fmt.Sprintf(" %d err", failedC))
 	}
 	tiles := []struct{ title, value string }{
+		{"Instances", vmValue},
 		{"Containers", contValue},
 		{"Databases", fmt.Sprintf("%d/%d ready", readyD, len(dbs))},
 	}
@@ -110,16 +117,25 @@ func (m Model) dashboardHeader() string {
 	}
 
 	lines := []string{head}
-	if missing := m.metrics.data.MissingTokens; len(missing) > 0 && !m.tokens.loading {
-		scopes := make([]string, len(missing))
-		for i, pr := range missing {
-			scopes[i] = m.projectName(pr.ProjectID) + " (" + pr.Region + ")"
-		}
-		note := "Metrics need a read-only Cockpit token for " + strings.Join(scopes, ", ") +
-			". Press T to create them (saved to ~/.config/scwpod/cockpit-tokens.json)."
-		lines = append(lines, warn.Width(max(m.width, 20)).Render(note))
+	if note := m.tokenNote(); note != "" {
+		lines = append(lines, note)
 	}
 	return strings.Join(lines, "\n")
+}
+
+// tokenNote asks for the missing Cockpit tokens, or is "".
+func (m Model) tokenNote() string {
+	missing := m.metrics.data.MissingTokens
+	if len(missing) == 0 || m.tokens.loading {
+		return ""
+	}
+	scopes := make([]string, len(missing))
+	for i, pr := range missing {
+		scopes[i] = m.projectName(pr.ProjectID) + " (" + pr.Region + ")"
+	}
+	note := "Metrics need a read-only Cockpit token for " + strings.Join(scopes, ", ") +
+		". Press T to create them (saved to ~/.config/scwpod/cockpit-tokens.json)."
+	return warn.Width(max(m.width, 20)).Render(note)
 }
 
 func fmtDuration(d time.Duration) string {
@@ -174,10 +190,23 @@ var databaseMetricCols = []metricCol{
 	{core.MetricCacheHit, "Cache", "Cache hit ratio", 5, 1, nil},
 }
 
+var instanceMetricCols = []metricCol{
+	{core.MetricCPU, "CPU", "CPU", 5, 1, nil},
+	{core.MetricMemory, "Mem", "Memory", 5, 1, nil},
+	{core.MetricDiskIO, "Disk I/O", "Disk I/O", 9, 1, nil},
+	{core.MetricNetwork, "Net", "Network", 9, 1, nil},
+}
+
 // metricTable builds a pane with fixed leading columns followed by one
-// column per metric.
+// column per metric, and Grafana link columns on wide screens when the
+// resource type has dashboards.
 func (m Model) metricTable(title string, fixed []col, metrics []metricCol, n int,
 	row func(i int) ([]string, core.ResourceMetrics, any)) paneData {
+	return m.metricTableLinks(title, fixed, metrics, n, row, true)
+}
+
+func (m Model) metricTableLinks(title string, fixed []col, metrics []metricCol, n int,
+	row func(i int) ([]string, core.ResourceMetrics, any), withLinks bool) paneData {
 	// Keep columns readable on narrow screens (Termux) by dropping the
 	// lowest-priority metrics, which are last in the list; the detail view
 	// still shows all of them.
@@ -189,7 +218,7 @@ func (m Model) metricTable(title string, fixed []col, metrics []metricCol, n int
 	for _, mc := range metrics {
 		cols = append(cols, col{mc.title, mc.min, mc.weight, right})
 	}
-	linkCols := m.width >= minWidthForLinks
+	linkCols := withLinks && m.width >= minWidthForLinks
 	if linkCols {
 		cols = append(cols, col{"Metrics", 9, 0, left}, col{"Logs", 6, 0, left})
 	}
@@ -233,7 +262,15 @@ func withData(metrics []metricCol, n int, rm func(int) core.ResourceMetrics) []m
 func (m Model) dashboardPanes(scope string) []paneData {
 	containers := core.ByProject(m.containers.data, scope, func(c core.Container) string { return c.ProjectID })
 	dbs := core.ByProject(m.databases.data, scope, func(d core.Database) string { return d.ProjectID })
+	instances := core.ByProject(m.instances.data, scope, func(i core.Instance) string { return i.ProjectID })
 	return []paneData{
+		m.metricTableLinks("Instances",
+			[]col{{"Name", 10, 2, left}, {"Project", 8, 1, left}, {"Type", 7, 0, left}, {"Status", 7, 0, left}},
+			instanceMetricCols, len(instances),
+			func(i int) ([]string, core.ResourceMetrics, any) {
+				in := instances[i]
+				return []string{in.Name, m.projectName(in.ProjectID), in.Type, instanceState(in)}, m.instanceMetrics(in), in
+			}, false),
 		m.metricTable("Containers",
 			[]col{{"Name", 10, 2, left}, {"Project", 8, 1, left}, {"Status", 10, 0, left}},
 			containerMetricCols, len(containers),

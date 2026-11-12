@@ -39,8 +39,8 @@ type CockpitTokens interface {
 	SetToken(pr ProjectRegion, secret string) error
 }
 
-// Metrics is the result of a metrics fetch, keyed by container or
-// database ID.
+// Metrics is the result of a metrics fetch, keyed by container, database
+// or Instance ID.
 type Metrics struct {
 	ByResource    map[string]ResourceMetrics
 	MissingTokens []ProjectRegion // scopes with resources but no token
@@ -52,12 +52,14 @@ type Metrics struct {
 // group is the set of resources sharing one Cockpit scope.
 type group struct {
 	containerIDs []string
+	instanceIDs  []string
 	dbsByEngine  map[string][]string // engine metric prefix -> database IDs
 }
 
-// Metrics fetches the last MetricsWindow of metrics for containers and
-// databases from Cockpit, one query set per project and region.
-func (s *Service) Metrics(ctx context.Context, containers []Container, dbs []Database, tokens CockpitTokens, now time.Time) (Metrics, error) {
+// Metrics fetches the last MetricsWindow of metrics for containers,
+// databases and Instances from Cockpit, one query set per project and
+// region (an Instance's zone belongs to a region).
+func (s *Service) Metrics(ctx context.Context, containers []Container, dbs []Database, instances []Instance, tokens CockpitTokens, now time.Time) (Metrics, error) {
 	groups := map[ProjectRegion]*group{}
 	get := func(pr ProjectRegion) *group {
 		if groups[pr] == nil {
@@ -76,6 +78,15 @@ func (s *Service) Metrics(ctx context.Context, containers []Container, dbs []Dat
 		}
 		g := get(ProjectRegion{d.ProjectID, d.Region})
 		g.dbsByEngine[prefix] = append(g.dbsByEngine[prefix], d.ID)
+	}
+
+	for _, in := range instances {
+		region, err := scw.Zone(in.Zone).Region()
+		if err != nil {
+			continue
+		}
+		g := get(ProjectRegion{in.ProjectID, string(region)})
+		g.instanceIDs = append(g.instanceIDs, in.ID)
 	}
 
 	out := Metrics{ByResource: map[string]ResourceMetrics{}, Names: map[string]string{}}
@@ -131,6 +142,9 @@ func (s *Service) groupMetrics(ctx context.Context, pr ProjectRegion, token stri
 	if len(g.containerIDs) > 0 {
 		queries = append(queries, containerQueries(info, idSelector(g.containerIDs))...)
 	}
+	if len(g.instanceIDs) > 0 {
+		queries = append(queries, instanceQueries(info, idSelector(g.instanceIDs))...)
+	}
 	for prefix, ids := range g.dbsByEngine {
 		queries = append(queries, databaseQueries(prefix, idSelector(ids), info)...)
 	}
@@ -184,6 +198,7 @@ func (s *Service) sourceInfo(ctx context.Context, p *promClient, now time.Time) 
 	for _, match := range []string{
 		fmt.Sprintf(`{__name__=~"%s.+"}`, ContainerMetricPrefix),
 		fmt.Sprintf(`{__name__=~"%s.+"}`, databaseMetricRoot),
+		fmt.Sprintf(`{__name__=~"%s.+"}`, InstanceMetricPrefix),
 	} {
 		names, err := p.labelValues(ctx, "__name__", match)
 		if err != nil {
@@ -196,6 +211,12 @@ func (s *Service) sourceInfo(ctx context.Context, p *promClient, now time.Time) 
 	if req := PickContainerMetrics(info.Names())[MetricRequests]; req != "" {
 		if series, err := p.query(ctx, "topk(1, "+req+")"); err == nil && len(series) > 0 {
 			info.StatusLabel = statusLabel(series[0].labels)
+		}
+	}
+
+	if cpu := info.instanceCPU(); cpu != "" && isCounter(cpu) {
+		if series, err := p.query(ctx, "topk(1, "+cpu+")"); err == nil && len(series) > 0 {
+			_, info.InstanceCPUMode = series[0].labels["mode"]
 		}
 	}
 
@@ -414,8 +435,12 @@ func (s *Service) SampleLabels(ctx context.Context, pr ProjectRegion, token stri
 		return nil
 	}
 	out := map[string]map[string]string{}
-	for _, prefix := range []string{ContainerMetricPrefix, databaseMetricRoot} {
-		for _, n := range info.Names() {
+	for _, prefix := range []string{ContainerMetricPrefix, databaseMetricRoot, InstanceMetricPrefix} {
+		names := info.Names()
+		if cpu := info.instanceCPU(); prefix == InstanceMetricPrefix && cpu != "" {
+			names = []string{cpu} // its labels decide how CPU is queried
+		}
+		for _, n := range names {
 			if !strings.HasPrefix(n, prefix) {
 				continue
 			}
